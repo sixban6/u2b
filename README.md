@@ -3,24 +3,11 @@
 一个面向 YouTube 的命令行下载工具，支持公共视频和会员视频（`yt-dlp` 驱动）。
 
 ## 最简安装
-
-1) 安装 `yt-dlp`
-
 ```bash
-# macOS
-brew install yt-dlp
-```
-
-2) 安装 `u2b_download`
-
-```bash
-GOPROXY=direct go install git.sr.ht/~sixban/u2b_download@main
-```
-
-3) 验证
-
-```bash
-u2b_download --version
+git clone https://git.sr.ht/~sixban/u2b_download
+cd u2b_download
+chmod +x install.sh
+./install.sh
 ```
 
 ## 最简使用
@@ -43,6 +30,7 @@ u2b_download download -q hd720 "https://www.youtube.com/watch?v=VIDEO_ID"
 u2b_download download -o /Volumes/lexar/音乐/高昂 -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
 ```
 
+## 高级使用
 需要会员视频时，再初始化并修改配置：
 
 ```bash
@@ -50,7 +38,7 @@ u2b_download config init
 u2b_download config validate
 ```
 
-## 默认参数（与 `config.yaml` 对齐）
+默认参数（与 `config.yaml` 对齐）
 
 ```yaml
 auth:
@@ -85,14 +73,4 @@ youtube:
   client: "web_creator"
   skip_premium_only: true
   extract_chapters: true
-```
-
-## TDD 与测试
-
-- 所有测试文件均放在 `test/` 目录。
-- 开发流程：先写测试，再实现，再回归。
-
-```bash
-go test ./test/...
-go test ./...
 ```
