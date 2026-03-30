@@ -18,14 +18,7 @@ chmod +x install.sh
 u2b_download "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
-指定清晰度：
-
-```bash
-u2b_download download -q hd720 "https://www.youtube.com/watch?v=VIDEO_ID"
-```
-
 指定下载目录和文件名（如 `Star Sky`）：
-
 ```bash
 u2b_download download -o /Volumes/lexar/音乐/高昂 -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
 ```
