@@ -25,13 +25,13 @@ type YtdlpExecutor struct {
 
 // YtdlpOptions represents options for yt-dlp execution
 type YtdlpOptions struct {
-	URL            string
-	Quality        string
-	OutputDir      string
-	OutputTemplate string
-	AuthArgs       []string
-	ExtraArgs      []string
-	DownloadPlaylist bool   // Whether to download entire playlist
+	URL              string
+	Quality          string
+	OutputDir        string
+	OutputTemplate   string
+	AuthArgs         []string
+	ExtraArgs        []string
+	DownloadPlaylist bool // Whether to download entire playlist
 }
 
 // NewYtdlpExecutor creates a new yt-dlp executor
@@ -39,7 +39,7 @@ func NewYtdlpExecutor(cfg *config.Config) (*YtdlpExecutor, error) {
 	executor := &YtdlpExecutor{
 		config: cfg,
 	}
-	
+
 	// Determine yt-dlp path
 	ytdlpPath := cfg.Advanced.YtdlpPath
 	if ytdlpPath == "" {
@@ -53,14 +53,14 @@ func NewYtdlpExecutor(cfg *config.Config) (*YtdlpExecutor, error) {
 				"/opt/homebrew/bin/yt-dlp",
 				filepath.Join(os.Getenv("HOME"), ".local/bin/yt-dlp"),
 			}
-			
+
 			for _, commonPath := range commonPaths {
 				if _, err := os.Stat(commonPath); err == nil {
 					ytdlpPath = commonPath
 					break
 				}
 			}
-			
+
 			if ytdlpPath == "" {
 				return nil, fmt.Errorf("yt-dlp not found in PATH or common locations. Please install yt-dlp or specify path in config")
 			}
@@ -68,14 +68,14 @@ func NewYtdlpExecutor(cfg *config.Config) (*YtdlpExecutor, error) {
 			ytdlpPath = path
 		}
 	}
-	
+
 	executor.ytdlpPath = ytdlpPath
-	
+
 	// Verify yt-dlp is executable
 	if err := executor.verifyYtdlp(); err != nil {
 		return nil, fmt.Errorf("yt-dlp verification failed: %w", err)
 	}
-	
+
 	return executor, nil
 }
 
@@ -83,58 +83,58 @@ func NewYtdlpExecutor(cfg *config.Config) (*YtdlpExecutor, error) {
 func (y *YtdlpExecutor) verifyYtdlp() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, "--version")
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to run yt-dlp --version: %w", err)
 	}
-	
+
 	version := strings.TrimSpace(string(output))
 	if version == "" {
 		return fmt.Errorf("yt-dlp returned empty version")
 	}
-	
+
 	return nil
 }
 
 // Download performs the actual download
 func (y *YtdlpExecutor) Download(ctx context.Context, options *YtdlpOptions) (*DownloadResult, error) {
 	startTime := time.Now()
-	
+
 	// Build command arguments
 	args := y.buildDownloadArgs(options)
-	
+
 	// Create command
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
-	
+
 	// Set up output capture for progress monitoring
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
-	
+
 	// Start the command
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start yt-dlp: %w", err)
 	}
-	
+
 	// Monitor progress
 	result := &DownloadResult{Success: false}
 	errorOutput := ""
-	
+
 	// Read stderr for errors
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
 			errorOutput += line + "\n"
-			
+
 			// Parse progress from stderr if callback is set
 			if y.progressCallback != nil {
 				progress := y.parseProgress(line)
@@ -144,7 +144,7 @@ func (y *YtdlpExecutor) Download(ctx context.Context, options *YtdlpOptions) (*D
 			}
 		}
 	}()
-	
+
 	// Read stdout for output
 	outputLines := []string{}
 	go func() {
@@ -154,23 +154,27 @@ func (y *YtdlpExecutor) Download(ctx context.Context, options *YtdlpOptions) (*D
 			outputLines = append(outputLines, line)
 		}
 	}()
-	
+
 	// Wait for completion
 	err = cmd.Wait()
 	downloadTime := time.Since(startTime).Seconds()
 	result.DownloadTime = downloadTime
-	
+
 	if err != nil {
 		result.Error = fmt.Sprintf("yt-dlp failed: %v\nOutput: %s", err, errorOutput)
-		return result, fmt.Errorf("download failed: %w", err)
+		trimmedErr := strings.TrimSpace(errorOutput)
+		if trimmedErr == "" {
+			return result, fmt.Errorf("download failed: %w", err)
+		}
+		return result, fmt.Errorf("download failed: %w: %s", err, trimmedErr)
 	}
-	
+
 	// Parse result from output
 	if err := y.parseDownloadResult(result, outputLines, options); err != nil {
 		result.Error = err.Error()
 		return result, err
 	}
-	
+
 	result.Success = true
 	return result, nil
 }
@@ -182,27 +186,26 @@ func (y *YtdlpExecutor) GetPlaylistInfo(ctx context.Context, url string, authArg
 		"--no-download",
 		"--no-warnings",
 		"--flat-playlist", // Get playlist info only
-		url,
 	}
-	
+
 	// Add authentication arguments
 	if len(authArgs) > 0 {
-		args = append(args[:len(args)-1], append(authArgs, args[len(args)-1])...)
+		args = append(args, authArgs...)
 	}
-	
+
 	// Add YouTube-specific arguments
-	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.config.YouTube.Client))
-	
+	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.config.YouTube.Client), url)
+
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get playlist info: %w", err)
+		return nil, fmt.Errorf("failed to get playlist info: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	
+
 	// Parse JSON output - handle multiple JSON objects
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var playlistInfo config.VideoInfo
-	
+
 	// Use the first/main JSON object which should be the playlist info
 	if len(lines) > 0 {
 		if err := json.Unmarshal([]byte(lines[0]), &playlistInfo); err != nil {
@@ -211,7 +214,7 @@ func (y *YtdlpExecutor) GetPlaylistInfo(ctx context.Context, url string, authArg
 	} else {
 		return nil, fmt.Errorf("no playlist info returned")
 	}
-	
+
 	return &playlistInfo, nil
 }
 
@@ -222,27 +225,26 @@ func (y *YtdlpExecutor) GetVideoInfo(ctx context.Context, url string, authArgs [
 		"--no-download",
 		"--no-warnings",
 		"--no-playlist", // Get info for single video only
-		url,
 	}
-	
+
 	// Add authentication arguments
 	if len(authArgs) > 0 {
-		args = append(args[:len(args)-1], append(authArgs, args[len(args)-1])...)
+		args = append(args, authArgs...)
 	}
-	
+
 	// Add YouTube-specific arguments
-	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.config.YouTube.Client))
-	
+	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.config.YouTube.Client), url)
+
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get video info: %w", err)
+		return nil, fmt.Errorf("failed to get video info: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	
+
 	// Parse JSON output - handle multiple JSON objects
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var videoInfo config.VideoInfo
-	
+
 	// Use the first/main JSON object
 	if len(lines) > 0 {
 		if err := json.Unmarshal([]byte(lines[0]), &videoInfo); err != nil {
@@ -251,10 +253,10 @@ func (y *YtdlpExecutor) GetVideoInfo(ctx context.Context, url string, authArgs [
 	} else {
 		return nil, fmt.Errorf("no video info returned")
 	}
-	
+
 	// Extract available qualities from formats
 	videoInfo.AvailableQualities = y.extractQualities(videoInfo.Formats)
-	
+
 	return &videoInfo, nil
 }
 
@@ -265,12 +267,12 @@ func (y *YtdlpExecutor) buildDownloadArgs(options *YtdlpOptions) []string {
 		"--newline",
 		"--output", filepath.Join(options.OutputDir, options.OutputTemplate),
 	}
-	
+
 	// Add playlist handling
 	if !options.DownloadPlaylist {
 		args = append(args, "--no-playlist") // Default to single video
 	}
-	
+
 	// Add quality selection
 	if options.Quality != "" {
 		if options.Quality == config.QualityBest {
@@ -295,43 +297,43 @@ func (y *YtdlpExecutor) buildDownloadArgs(options *YtdlpOptions) []string {
 			args = append(args, "--format", fmt.Sprintf("best[height<=%s]/best", height))
 		}
 	}
-	
+
 	// Add authentication arguments
 	if len(options.AuthArgs) > 0 {
 		args = append(args, options.AuthArgs...)
 	}
-	
+
 	// Add YouTube-specific arguments
 	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.config.YouTube.Client))
-	
+
 	// Add proxy if configured
 	if y.config.Proxy.Enabled && y.config.Proxy.URL != "" {
 		args = append(args, "--proxy", y.config.Proxy.URL)
 	}
-	
+
 	// Add user agent if specified
 	if y.config.Advanced.UserAgent != "" {
 		args = append(args, "--user-agent", y.config.Advanced.UserAgent)
 	}
-	
+
 	// Add retry count
 	if y.config.Advanced.RetryCount > 0 {
 		args = append(args, "--retries", strconv.Itoa(y.config.Advanced.RetryCount))
 	}
-	
+
 	// Add extra arguments from config
 	if len(y.config.Advanced.ExtraArgs) > 0 {
 		args = append(args, y.config.Advanced.ExtraArgs...)
 	}
-	
+
 	// Add extra arguments from options
 	if len(options.ExtraArgs) > 0 {
 		args = append(args, options.ExtraArgs...)
 	}
-	
+
 	// Add URL last
 	args = append(args, options.URL)
-	
+
 	return args
 }
 
@@ -340,13 +342,13 @@ func (y *YtdlpExecutor) parseProgress(line string) *DownloadProgress {
 	// yt-dlp progress line format: [download] 12.5% of 100.00MiB at 1.23MiB/s ETA 00:42
 	progressRegex := regexp.MustCompile(`\[download\]\s+(\d+\.?\d*)%\s+of\s+([\d.]+\w+)\s+at\s+([\d.]+\w+/s)\s+ETA\s+([\d:]+)`)
 	matches := progressRegex.FindStringSubmatch(line)
-	
+
 	if len(matches) != 5 {
 		return nil
 	}
-	
+
 	percentage, _ := strconv.ParseFloat(matches[1], 64)
-	
+
 	return &DownloadProgress{
 		Status:     "downloading",
 		Percentage: percentage,
@@ -366,7 +368,7 @@ func (y *YtdlpExecutor) parseDownloadResult(result *DownloadResult, outputLines 
 				result.FilePath = strings.TrimSpace(parts[1])
 			}
 		}
-		
+
 		// Look for file size information
 		if strings.Contains(line, "[download]") && strings.Contains(line, "100%") {
 			// Extract file size and other info from final progress line
@@ -383,29 +385,29 @@ func (y *YtdlpExecutor) parseDownloadResult(result *DownloadResult, outputLines 
 			}
 		}
 	}
-	
+
 	// Get file info if we have a file path
 	if result.FilePath != "" {
 		if stat, err := os.Stat(result.FilePath); err == nil {
 			result.FileSize = stat.Size()
 		}
 	}
-	
+
 	result.Quality = options.Quality
 	result.Format = "mp4" // Default, could be extracted from output
-	
+
 	return nil
 }
 
 // extractQualities extracts available qualities from format list
 func (y *YtdlpExecutor) extractQualities(formats []config.FormatInfo) []string {
 	qualityMap := make(map[string]bool)
-	
+
 	for _, format := range formats {
 		if format.Height > 0 {
 			quality := fmt.Sprintf("%d", format.Height)
 			qualityMap[quality] = true
-			
+
 			// Add standard quality names
 			switch format.Height {
 			case 2160:
@@ -425,13 +427,13 @@ func (y *YtdlpExecutor) extractQualities(formats []config.FormatInfo) []string {
 			}
 		}
 	}
-	
+
 	// Convert to slice
 	qualities := make([]string, 0, len(qualityMap))
 	for quality := range qualityMap {
 		qualities = append(qualities, quality)
 	}
-	
+
 	return qualities
 }
 

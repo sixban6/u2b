@@ -14,7 +14,7 @@ brew install yt-dlp
 2) 安装 `u2b_download`
 
 ```bash
-go install git.sr.ht/~sixban/u2b_download@latest
+GOPROXY=direct go install git.sr.ht/~sixban/u2b_download@main
 ```
 
 3) 验证
