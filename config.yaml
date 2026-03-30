@@ -1,78 +1,33 @@
-# u2b_download Configuration File
-# Copy this file to config.yaml and modify according to your needs
-
 auth:
-  # Authentication method: "browser" or "cookies_file"
-  method: "browser"
-  
-  # Browser to extract cookies from (when method is "browser")
-  # Supported: chrome, firefox, safari, edge, opera, brave, vivaldi
+  # none / browser / cookies_file
+  method: "none"
   browser: "brave"
-  
-  # Path to cookie file in Netscape format (when method is "cookies_file")
-  # You can export cookies using browser extensions like "cookies.txt"
   cookies_file: ""
-  
+
 download:
-  # Directory where downloaded videos will be saved
-  output_dir: "/Volumes/lexar/音乐/其他"
-  
-  # Output filename template using yt-dlp format
-  # Available placeholders: %(title)s, %(uploader)s, %(upload_date)s, %(ext)s, etc.
+  output_dir: "./downloads"
   output_template: "%(uploader)s - %(title)s [%(id)s].%(ext)s"
-  
-  # Number of concurrent downloads (1-10)
   concurrent_downloads: 3
-  
-  # Whether to keep temporary files on error
   keep_temp_files: false
 
 quality:
-  # Preferred video quality
-  # Options: hd2160, hd1440, hd1080, hd720, sd480, sd360, sd240, best, worst
   preferred: "hd1080"
-  
-  # Fallback quality if preferred is not available
-  fallback: "hd1080"
-  
-  # Audio quality preference
-  # Options: best, worst, or specific format like "mp3", "aac"
+  fallback: "hd720"
   audio_quality: "best"
 
 proxy:
-  # Enable proxy usage
   enabled: false
-  
-  # Proxy URL (http://user:pass@host:port or socks5://user:pass@host:port)
   url: ""
 
 advanced:
-  # Custom User-Agent string (leave empty for default)
   user_agent: ""
-  
-  # Number of retry attempts on failure
   retry_count: 3
-  
-  # Download timeout duration (e.g., "30m", "1h")
   timeout: "30m"
-  
-  # Enable verbose logging
-  verbose: true
-  
-  # Custom yt-dlp path (leave empty to use embedded)
+  verbose: false
   ytdlp_path: ""
-  
-  # Additional yt-dlp arguments
   extra_args: []
 
-# YouTube specific settings
 youtube:
-  # Use specific client for better success rate with membership videos
-  # Options: tv, web, web_creator, android, ios
   client: "web_creator"
-  
-  # Skip videos that require purchase/rental (not membership)
   skip_premium_only: true
-  
-  # Extract chapters/timestamps if available
   extract_chapters: true

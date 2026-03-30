@@ -9,15 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"git.sr.ht/~sixban/u2b_download/config"
 	"git.sr.ht/~sixban/u2b_download/downloader"
+	"github.com/spf13/cobra"
 )
 
 var (
 	configPath  string
 	verbose     bool
 	outputDir   string
+	fileName    string
 	quality     string
 	format      string
 	authMethod  string
@@ -38,11 +39,15 @@ including content from membership channels. It uses yt-dlp under the hood
 and supports various authentication methods including browser cookies.
 
 Examples:
+  u2b_download "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b_download download -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b_download download -q hd1080 "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b_download download --quality hd720 --output-dir ./videos "URL"
   u2b_download info "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b_download config init`,
 	Version: "1.0.0",
+	Args:    cobra.MaximumNArgs(1),
+	RunE:    runRoot,
 }
 
 // downloadCmd represents the download command
@@ -131,8 +136,9 @@ func init() {
 	// Download command flags
 	downloadCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
 	downloadCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
+	downloadCmd.Flags().StringVarP(&fileName, "filename", "n", "", "set output file name (without extension)")
 	downloadCmd.Flags().StringVar(&format, "format", "", "output format")
-	downloadCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (browser, cookies_file)")
+	downloadCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
 	downloadCmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction (chrome, firefox, etc.)")
 	downloadCmd.Flags().StringVar(&cookiesFile, "cookies-file", "", "path to cookies file")
 	downloadCmd.Flags().StringVar(&proxy, "proxy", "", "proxy URL")
@@ -143,7 +149,7 @@ func init() {
 	// Download series command flags
 	downloadSeriesCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
 	downloadSeriesCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
-	downloadSeriesCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (browser, cookies_file)")
+	downloadSeriesCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
 	downloadSeriesCmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction")
 	downloadSeriesCmd.Flags().IntVar(&concurrent, "concurrent", 0, "number of concurrent downloads")
 
@@ -154,6 +160,19 @@ func init() {
 	rootCmd.AddCommand(downloadSeriesCmd)
 	configCmd.AddCommand(initConfigCmd)
 	configCmd.AddCommand(validateConfigCmd)
+}
+
+func runRoot(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+
+	url := args[0]
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("unknown command %q for %q", url, cmd.CommandPath())
+	}
+
+	return runDownload(downloadCmd, args)
 }
 
 // runDownload executes the download command
@@ -197,6 +216,13 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	if quality != "" {
 		options.Quality = quality
 	}
+	if fileName != "" {
+		customTemplate, err := BuildOutputTemplateForFilename(fileName)
+		if err != nil {
+			return err
+		}
+		options.OutputTemplate = customTemplate
+	}
 
 	// Create context with timeout
 	ctx := context.Background()
@@ -210,6 +236,9 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Starting download of: %s\n", url)
 	fmt.Printf("Quality: %s\n", options.Quality)
 	fmt.Printf("Output directory: %s\n", options.OutputDir)
+	if fileName != "" {
+		fmt.Printf("Output filename: %s\n", fileName)
+	}
 
 	result, err := d.Download(ctx, url, options)
 	if err != nil {
@@ -495,7 +524,9 @@ func runValidateConfig(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Config file: %s\n", getEffectiveConfigPath())
 	fmt.Printf("  Auth method: %s\n", cfg.Auth.Method)
 
-	if cfg.Auth.Method == config.AuthMethodBrowser {
+	if cfg.Auth.Method == config.AuthMethodNone {
+		fmt.Printf("  Auth mode: none (public videos)\n")
+	} else if cfg.Auth.Method == config.AuthMethodBrowser {
 		fmt.Printf("  Browser: %s\n", cfg.Auth.Browser)
 	} else if cfg.Auth.Method == config.AuthMethodCookiesFile {
 		fmt.Printf("  Cookies file: %s\n", cfg.Auth.CookiesFile)
@@ -577,4 +608,36 @@ func overrideConfigWithFlags(cfg *config.Config) {
 			}
 		}
 	}
+}
+
+// BuildOutputTemplateForFilename builds a yt-dlp output template from a custom filename.
+// It keeps the extension dynamic (e.g. ".%(ext)s") so actual downloaded format is preserved.
+func BuildOutputTemplateForFilename(name string) (string, error) {
+	cleaned := strings.TrimSpace(name)
+	if cleaned == "" {
+		return "", fmt.Errorf("filename cannot be empty")
+	}
+
+	ext := filepath.Ext(cleaned)
+	if ext != "" {
+		cleaned = strings.TrimSuffix(cleaned, ext)
+	}
+
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	cleaned = strings.TrimSpace(replacer.Replace(cleaned))
+	if cleaned == "" {
+		return "", fmt.Errorf("filename cannot be empty")
+	}
+
+	return cleaned + ".%(ext)s", nil
 }

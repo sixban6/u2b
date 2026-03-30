@@ -14,6 +14,9 @@ type BrowserAuthProvider struct {
 	browser string
 }
 
+// NoAuthProvider disables authentication for public videos.
+type NoAuthProvider struct{}
+
 // CookieFileAuthProvider handles authentication via cookie files
 type CookieFileAuthProvider struct {
 	cookiesFile string
@@ -22,6 +25,8 @@ type CookieFileAuthProvider struct {
 // NewAuthProvider creates a new auth provider based on configuration
 func NewAuthProvider(authConfig config.AuthConfig) (AuthProvider, error) {
 	switch authConfig.Method {
+	case config.AuthMethodNone:
+		return &NoAuthProvider{}, nil
 	case config.AuthMethodBrowser:
 		return NewBrowserAuthProvider(authConfig.Browser)
 	case config.AuthMethodCookiesFile:
@@ -31,18 +36,33 @@ func NewAuthProvider(authConfig config.AuthConfig) (AuthProvider, error) {
 	}
 }
 
+// GetAuthArgs returns empty auth args for public downloads.
+func (n *NoAuthProvider) GetAuthArgs() ([]string, error) {
+	return []string{}, nil
+}
+
+// ValidateAuth is a no-op for public downloads.
+func (n *NoAuthProvider) ValidateAuth() error {
+	return nil
+}
+
+// GetCookies returns debugging info for no-auth mode.
+func (n *NoAuthProvider) GetCookies() (string, error) {
+	return "authentication disabled (public mode)", nil
+}
+
 // NewBrowserAuthProvider creates a new browser auth provider
 func NewBrowserAuthProvider(browser string) (*BrowserAuthProvider, error) {
 	if browser == "" {
 		browser = config.BrowserChrome
 	}
-	
+
 	// Validate browser
 	validBrowsers := []string{
-		config.BrowserChrome, config.BrowserFirefox, config.BrowserSafari, 
+		config.BrowserChrome, config.BrowserFirefox, config.BrowserSafari,
 		config.BrowserEdge, config.BrowserOpera, config.BrowserBrave, config.BrowserVivaldi,
 	}
-	
+
 	browserValid := false
 	for _, validBrowser := range validBrowsers {
 		if browser == validBrowser {
@@ -50,12 +70,12 @@ func NewBrowserAuthProvider(browser string) (*BrowserAuthProvider, error) {
 			break
 		}
 	}
-	
+
 	if !browserValid {
-		return nil, fmt.Errorf("unsupported browser: %s (supported: %s)", 
+		return nil, fmt.Errorf("unsupported browser: %s (supported: %s)",
 			browser, strings.Join(validBrowsers, ", "))
 	}
-	
+
 	return &BrowserAuthProvider{browser: browser}, nil
 }
 
@@ -71,9 +91,9 @@ func (b *BrowserAuthProvider) ValidateAuth() error {
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	
+
 	var profilePaths []string
-	
+
 	switch b.browser {
 	case config.BrowserChrome:
 		profilePaths = []string{
@@ -83,8 +103,8 @@ func (b *BrowserAuthProvider) ValidateAuth() error {
 		}
 	case config.BrowserFirefox:
 		profilePaths = []string{
-			filepath.Join(homeDir, "Library/Application Support/Firefox"),       // macOS
-			filepath.Join(homeDir, ".mozilla/firefox"),                          // Linux
+			filepath.Join(homeDir, "Library/Application Support/Firefox"),      // macOS
+			filepath.Join(homeDir, ".mozilla/firefox"),                         // Linux
 			filepath.Join(homeDir, "AppData/Roaming/Mozilla/Firefox/Profiles"), // Windows
 		}
 	case config.BrowserSafari:
@@ -116,7 +136,7 @@ func (b *BrowserAuthProvider) ValidateAuth() error {
 			filepath.Join(homeDir, "AppData/Local/Vivaldi/User Data"),     // Windows
 		}
 	}
-	
+
 	// Check if any profile path exists
 	pathFound := false
 	for _, path := range profilePaths {
@@ -125,12 +145,12 @@ func (b *BrowserAuthProvider) ValidateAuth() error {
 			break
 		}
 	}
-	
+
 	if !pathFound {
-		return fmt.Errorf("browser profile not found for %s (checked paths: %s)", 
+		return fmt.Errorf("browser profile not found for %s (checked paths: %s)",
 			b.browser, strings.Join(profilePaths, ", "))
 	}
-	
+
 	return nil
 }
 
@@ -144,7 +164,7 @@ func NewCookieFileAuthProvider(cookiesFile string) (*CookieFileAuthProvider, err
 	if cookiesFile == "" {
 		return nil, fmt.Errorf("cookies file path cannot be empty")
 	}
-	
+
 	// Expand path
 	if strings.HasPrefix(cookiesFile, "~/") {
 		homeDir, err := os.UserHomeDir()
@@ -153,13 +173,17 @@ func NewCookieFileAuthProvider(cookiesFile string) (*CookieFileAuthProvider, err
 		}
 		cookiesFile = filepath.Join(homeDir, cookiesFile[2:])
 	}
-	
+
 	// Make path absolute
 	absPath, err := filepath.Abs(cookiesFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path: %w", err)
 	}
-	
+
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("cookies file does not exist: %s", absPath)
+	}
+
 	return &CookieFileAuthProvider{cookiesFile: absPath}, nil
 }
 
@@ -174,47 +198,47 @@ func (c *CookieFileAuthProvider) ValidateAuth() error {
 	if _, err := os.Stat(c.cookiesFile); os.IsNotExist(err) {
 		return fmt.Errorf("cookies file does not exist: %s", c.cookiesFile)
 	}
-	
+
 	// Check if file is readable
 	file, err := os.Open(c.cookiesFile)
 	if err != nil {
 		return fmt.Errorf("cannot read cookies file: %w", err)
 	}
 	defer file.Close()
-	
+
 	// Basic validation of cookie file format
 	content, err := os.ReadFile(c.cookiesFile)
 	if err != nil {
 		return fmt.Errorf("failed to read cookies file: %w", err)
 	}
-	
+
 	contentStr := string(content)
-	
+
 	// Check for Netscape format or JSON format
-	isNetscape := strings.Contains(contentStr, "# Netscape HTTP Cookie File") || 
+	isNetscape := strings.Contains(contentStr, "# Netscape HTTP Cookie File") ||
 		strings.Contains(contentStr, ".youtube.com") ||
 		strings.Contains(contentStr, ".google.com")
-	
-	isJSON := strings.HasPrefix(strings.TrimSpace(contentStr), "[") && 
+
+	isJSON := strings.HasPrefix(strings.TrimSpace(contentStr), "[") &&
 		strings.HasSuffix(strings.TrimSpace(contentStr), "]")
-	
+
 	if !isNetscape && !isJSON {
 		return fmt.Errorf("cookies file does not appear to be in valid Netscape or JSON format")
 	}
-	
+
 	// Check for required domains
 	hasYoutubeCookies := strings.Contains(contentStr, "youtube.com")
 	hasGoogleCookies := strings.Contains(contentStr, "google.com") || strings.Contains(contentStr, "accounts.google.com")
-	
+
 	if !hasYoutubeCookies {
 		return fmt.Errorf("cookies file does not contain YouTube cookies")
 	}
-	
+
 	if !hasGoogleCookies {
 		// Warning but not fatal
 		fmt.Fprintf(os.Stderr, "Warning: cookies file may not contain Google account cookies\n")
 	}
-	
+
 	return nil
 }
 
@@ -225,17 +249,17 @@ func (c *CookieFileAuthProvider) GetCookies() (string, error) {
 
 // MockAuthProvider is a mock implementation for testing
 type MockAuthProvider struct {
-	authArgs     []string
-	validateErr  error
-	cookiesInfo  string
+	authArgs    []string
+	validateErr error
+	cookiesInfo string
 }
 
 // NewMockAuthProvider creates a new mock auth provider for testing
 func NewMockAuthProvider(authArgs []string, validateErr error, cookiesInfo string) *MockAuthProvider {
 	return &MockAuthProvider{
-		authArgs:     authArgs,
-		validateErr:  validateErr,
-		cookiesInfo:  cookiesInfo,
+		authArgs:    authArgs,
+		validateErr: validateErr,
+		cookiesInfo: cookiesInfo,
 	}
 }
 

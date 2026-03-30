@@ -14,8 +14,8 @@ type Config struct {
 
 // AuthConfig defines authentication settings
 type AuthConfig struct {
-	Method      string `yaml:"method" mapstructure:"method"`           // "browser" or "cookies_file"
-	Browser     string `yaml:"browser" mapstructure:"browser"`         // chrome, firefox, etc.
+	Method      string `yaml:"method" mapstructure:"method"`             // "none", "browser" or "cookies_file"
+	Browser     string `yaml:"browser" mapstructure:"browser"`           // chrome, firefox, etc.
 	CookiesFile string `yaml:"cookies_file" mapstructure:"cookies_file"` // path to cookie file
 }
 
@@ -29,8 +29,8 @@ type DownloadConfig struct {
 
 // QualityConfig defines video/audio quality preferences
 type QualityConfig struct {
-	Preferred    string `yaml:"preferred" mapstructure:"preferred"`       // preferred video quality
-	Fallback     string `yaml:"fallback" mapstructure:"fallback"`         // fallback video quality
+	Preferred    string `yaml:"preferred" mapstructure:"preferred"`         // preferred video quality
+	Fallback     string `yaml:"fallback" mapstructure:"fallback"`           // fallback video quality
 	AudioQuality string `yaml:"audio_quality" mapstructure:"audio_quality"` // audio quality preference
 }
 
@@ -52,9 +52,9 @@ type AdvancedConfig struct {
 
 // YouTubeConfig defines YouTube-specific settings
 type YouTubeConfig struct {
-	Client           string `yaml:"client" mapstructure:"client"`
-	SkipPremiumOnly  bool   `yaml:"skip_premium_only" mapstructure:"skip_premium_only"`
-	ExtractChapters  bool   `yaml:"extract_chapters" mapstructure:"extract_chapters"`
+	Client          string `yaml:"client" mapstructure:"client"`
+	SkipPremiumOnly bool   `yaml:"skip_premium_only" mapstructure:"skip_premium_only"`
+	ExtractChapters bool   `yaml:"extract_chapters" mapstructure:"extract_chapters"`
 }
 
 // DownloadOptions represents options for a single download operation
@@ -72,22 +72,22 @@ type DownloadOptions struct {
 
 // VideoInfo represents information about a video
 type VideoInfo struct {
-	ID                string            `json:"id"`
-	Title             string            `json:"title"`
-	Description       string            `json:"description"`
-	Uploader          string            `json:"uploader"`
-	Duration          float64           `json:"duration"`
-	UploadDate        string            `json:"upload_date"`
-	Formats           []FormatInfo      `json:"formats"`
-	Thumbnails        []ThumbnailInfo   `json:"thumbnails"`
-	AvailableQualities []string         `json:"-"` // derived from formats
-	Metadata          map[string]interface{} `json:"-"` // additional metadata
-	
+	ID                 string                 `json:"id"`
+	Title              string                 `json:"title"`
+	Description        string                 `json:"description"`
+	Uploader           string                 `json:"uploader"`
+	Duration           float64                `json:"duration"`
+	UploadDate         string                 `json:"upload_date"`
+	Formats            []FormatInfo           `json:"formats"`
+	Thumbnails         []ThumbnailInfo        `json:"thumbnails"`
+	AvailableQualities []string               `json:"-"` // derived from formats
+	Metadata           map[string]interface{} `json:"-"` // additional metadata
+
 	// Playlist information
-	PlaylistTitle     string            `json:"playlist_title"`
-	PlaylistID        string            `json:"playlist_id"`
-	PlaylistIndex     int               `json:"playlist_index"`
-	PlaylistCount     int               `json:"playlist_count"`
+	PlaylistTitle string `json:"playlist_title"`
+	PlaylistID    string `json:"playlist_id"`
+	PlaylistIndex int    `json:"playlist_index"`
+	PlaylistCount int    `json:"playlist_count"`
 }
 
 // FormatInfo represents a video format
@@ -100,7 +100,7 @@ type FormatInfo struct {
 	VCodec     string      `json:"vcodec"`
 	ACodec     string      `json:"acodec"`
 	Filesize   int64       `json:"filesize"`
-	Quality    interface{} `json:"quality"`    // Can be string or number
+	Quality    interface{} `json:"quality"` // Can be string or number
 	Resolution string      `json:"resolution"`
 }
 
@@ -113,19 +113,20 @@ type ThumbnailInfo struct {
 
 // AuthMethod constants
 const (
+	AuthMethodNone        = "none"
 	AuthMethodBrowser     = "browser"
 	AuthMethodCookiesFile = "cookies_file"
 )
 
 // Supported browsers
 const (
-	BrowserChrome   = "chrome"
-	BrowserFirefox  = "firefox"
-	BrowserSafari   = "safari"
-	BrowserEdge     = "edge"
-	BrowserOpera    = "opera"
-	BrowserBrave    = "brave"
-	BrowserVivaldi  = "vivaldi"
+	BrowserChrome  = "chrome"
+	BrowserFirefox = "firefox"
+	BrowserSafari  = "safari"
+	BrowserEdge    = "edge"
+	BrowserOpera   = "opera"
+	BrowserBrave   = "brave"
+	BrowserVivaldi = "vivaldi"
 )
 
 // Video quality constants
