@@ -10,6 +10,14 @@ chmod +x install.sh
 ./install.sh
 ```
 
+Windows（Git Bash）：
+```bash
+git clone https://git.sr.ht/~sixban/u2b_download
+cd u2b_download
+bash install.sh
+```
+`install.sh` 会自动检测系统，并在 Windows 下优先使用 `winget`（其次 `choco` / `scoop`）安装 `yt-dlp`。
+
 ## 最简使用
 
 无需先写配置，直接下载（默认参数已内置）：
