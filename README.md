@@ -23,6 +23,11 @@ u2b_download "https://www.youtube.com/watch?v=VIDEO_ID"
 u2b_download download -o /Volumes/lexar/音乐/高昂 -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
 ```
 
+只下载 MP3 音频（不下载视频文件）：
+```bash
+u2b_download download --format mp3 -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
+```
+
 ## 高级使用
 需要会员视频时，再初始化并修改配置：
 

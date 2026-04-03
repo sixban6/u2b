@@ -27,6 +27,8 @@ type YtdlpExecutor struct {
 type YtdlpOptions struct {
 	URL              string
 	Quality          string
+	Format           string
+	AudioQuality     string
 	OutputDir        string
 	OutputTemplate   string
 	AuthArgs         []string
@@ -273,8 +275,18 @@ func (y *YtdlpExecutor) buildDownloadArgs(options *YtdlpOptions) []string {
 		args = append(args, "--no-playlist") // Default to single video
 	}
 
-	// Add quality selection
-	if options.Quality != "" {
+	isAudioOnlyMP3 := strings.EqualFold(options.Format, config.OutputFormatMP3)
+
+	if isAudioOnlyMP3 {
+		args = append(args,
+			"--format", "bestaudio/best",
+			"--extract-audio",
+			"--audio-format", config.OutputFormatMP3,
+		)
+		if audioQuality := normalizeAudioQualityForYtdlp(options.AudioQuality); audioQuality != "" {
+			args = append(args, "--audio-quality", audioQuality)
+		}
+	} else if options.Quality != "" {
 		if options.Quality == config.QualityBest {
 			args = append(args, "--format", "best")
 		} else if options.Quality == config.QualityWorst {
@@ -337,6 +349,20 @@ func (y *YtdlpExecutor) buildDownloadArgs(options *YtdlpOptions) []string {
 	return args
 }
 
+func normalizeAudioQualityForYtdlp(raw string) string {
+	quality := strings.TrimSpace(strings.ToLower(raw))
+	switch quality {
+	case "":
+		return ""
+	case "best":
+		return "0"
+	case "worst":
+		return "10"
+	default:
+		return strings.TrimSpace(raw)
+	}
+}
+
 // parseProgress parses progress information from yt-dlp output
 func (y *YtdlpExecutor) parseProgress(line string) *DownloadProgress {
 	// yt-dlp progress line format: [download] 12.5% of 100.00MiB at 1.23MiB/s ETA 00:42
@@ -394,7 +420,19 @@ func (y *YtdlpExecutor) parseDownloadResult(result *DownloadResult, outputLines 
 	}
 
 	result.Quality = options.Quality
-	result.Format = "mp4" // Default, could be extracted from output
+	if result.FilePath != "" {
+		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(result.FilePath)), ".")
+		if ext != "" {
+			result.Format = ext
+		}
+	}
+	if result.Format == "" {
+		if strings.EqualFold(options.Format, config.OutputFormatMP3) {
+			result.Format = config.OutputFormatMP3
+		} else {
+			result.Format = "mp4"
+		}
+	}
 
 	return nil
 }

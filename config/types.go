@@ -61,6 +61,7 @@ type YouTubeConfig struct {
 type DownloadOptions struct {
 	URL            string
 	Quality        string
+	Format         string
 	OutputDir      string
 	OutputTemplate string
 	Headers        map[string]string
@@ -140,6 +141,11 @@ const (
 	Quality240p  = "sd240"
 	QualityBest  = "best"
 	QualityWorst = "worst"
+)
+
+// Output format constants
+const (
+	OutputFormatMP3 = "mp3"
 )
 
 // YouTube client types

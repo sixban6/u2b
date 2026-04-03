@@ -137,7 +137,7 @@ func init() {
 	downloadCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
 	downloadCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
 	downloadCmd.Flags().StringVarP(&fileName, "filename", "n", "", "set output file name (without extension)")
-	downloadCmd.Flags().StringVar(&format, "format", "", "output format")
+	downloadCmd.Flags().StringVar(&format, "format", "", "output format (mp3 for audio-only download)")
 	downloadCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
 	downloadCmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction (chrome, firefox, etc.)")
 	downloadCmd.Flags().StringVar(&cookiesFile, "cookies-file", "", "path to cookies file")
@@ -148,6 +148,7 @@ func init() {
 
 	// Download series command flags
 	downloadSeriesCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
+	downloadSeriesCmd.Flags().StringVar(&format, "format", "", "output format (mp3 for audio-only download)")
 	downloadSeriesCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
 	downloadSeriesCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
 	downloadSeriesCmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction")
@@ -188,6 +189,11 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	// Override config with command line flags
 	overrideConfigWithFlags(cfg)
 
+	selectedFormat, err := normalizeOutputFormat(format)
+	if err != nil {
+		return err
+	}
+
 	// Create downloader
 	d, err := downloader.NewYouTubeDownloader(cfg)
 	if err != nil {
@@ -207,6 +213,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	options := &config.DownloadOptions{
 		URL:            url,
 		Quality:        cfg.Quality.Preferred,
+		Format:         selectedFormat,
 		OutputDir:      cfg.Download.OutputDir,
 		OutputTemplate: cfg.Download.OutputTemplate,
 		ExtraArgs:      cfg.Advanced.ExtraArgs,
@@ -234,7 +241,11 @@ func runDownload(cmd *cobra.Command, args []string) error {
 
 	// Start download
 	fmt.Printf("Starting download of: %s\n", url)
-	fmt.Printf("Quality: %s\n", options.Quality)
+	if options.Format == config.OutputFormatMP3 {
+		fmt.Printf("Format: %s (audio-only)\n", options.Format)
+	} else {
+		fmt.Printf("Quality: %s\n", options.Quality)
+	}
 	fmt.Printf("Output directory: %s\n", options.OutputDir)
 	if fileName != "" {
 		fmt.Printf("Output filename: %s\n", fileName)
@@ -275,6 +286,11 @@ func runDownloadSeries(cmd *cobra.Command, args []string) error {
 
 	// Override config with command line flags
 	overrideConfigWithFlags(cfg)
+
+	selectedFormat, err := normalizeOutputFormat(format)
+	if err != nil {
+		return err
+	}
 
 	// Create downloader
 	d, err := downloader.NewYouTubeDownloader(cfg)
@@ -331,6 +347,7 @@ func runDownloadSeries(cmd *cobra.Command, args []string) error {
 	options := &config.DownloadOptions{
 		URL:            playlistURL,
 		Quality:        cfg.Quality.Preferred,
+		Format:         selectedFormat,
 		OutputDir:      seriesPath,                                          // Use series folder
 		OutputTemplate: "%(playlist_index)02d - %(title)s [%(id)s].%(ext)s", // Numbered format
 		ExtraArgs:      cfg.Advanced.ExtraArgs,
@@ -351,6 +368,9 @@ func runDownloadSeries(cmd *cobra.Command, args []string) error {
 
 	// Download the entire playlist
 	fmt.Printf("Starting playlist download...\n")
+	if options.Format == config.OutputFormatMP3 {
+		fmt.Printf("Format: %s (audio-only)\n", options.Format)
+	}
 
 	// We need to modify the download function to support playlists
 	// For now, let's use yt-dlp directly
@@ -400,8 +420,17 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 		"--extractor-args", "youtube:client=web_creator",
 	}
 
-	// Add quality selection
-	if options.Quality != "" {
+	// Add output/quality selection
+	if strings.EqualFold(options.Format, config.OutputFormatMP3) {
+		args = append(args,
+			"--format", "bestaudio/best",
+			"--extract-audio",
+			"--audio-format", config.OutputFormatMP3,
+		)
+		if audioQuality := normalizeAudioQualityForYtdlp(cfg.Quality.AudioQuality); audioQuality != "" {
+			args = append(args, "--audio-quality", audioQuality)
+		}
+	} else if options.Quality != "" {
 		height := options.Quality
 		if height == "hd1080" || height == config.Quality1080p {
 			height = "1080"
@@ -607,6 +636,33 @@ func overrideConfigWithFlags(cfg *config.Config) {
 				cfg.Download.OutputDir = absPath
 			}
 		}
+	}
+}
+
+func normalizeOutputFormat(raw string) (string, error) {
+	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), ".")
+	if normalized == "" {
+		return "", nil
+	}
+
+	if normalized == config.OutputFormatMP3 {
+		return normalized, nil
+	}
+
+	return "", fmt.Errorf("unsupported format %q (currently only %q is supported)", raw, config.OutputFormatMP3)
+}
+
+func normalizeAudioQualityForYtdlp(raw string) string {
+	quality := strings.TrimSpace(strings.ToLower(raw))
+	switch quality {
+	case "":
+		return ""
+	case "best":
+		return "0"
+	case "worst":
+		return "10"
+	default:
+		return strings.TrimSpace(raw)
 	}
 }
 

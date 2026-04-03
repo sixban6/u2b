@@ -121,6 +121,9 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *c
 	if url == "" {
 		return nil, fmt.Errorf("URL cannot be empty")
 	}
+	if options == nil {
+		return nil, fmt.Errorf("download options cannot be nil")
+	}
 
 	// Validate authentication before starting download
 	if err := d.ValidateAuth(ctx); err != nil {
@@ -133,21 +136,29 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *c
 		return nil, fmt.Errorf("failed to get video info: %w", err)
 	}
 
-	// Select quality
-	availableQualities := videoInfo.AvailableQualities
-	selectedQuality, err := d.qualitySelector.SelectBestQuality(
-		availableQualities,
-		options.Quality,
-		d.config.Quality.Fallback,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to select quality: %w", err)
+	requestedFormat := strings.ToLower(strings.TrimSpace(options.Format))
+	isAudioOnlyMP3 := requestedFormat == config.OutputFormatMP3
+
+	selectedQuality := ""
+	if !isAudioOnlyMP3 {
+		// Select quality only for video downloads.
+		availableQualities := videoInfo.AvailableQualities
+		selectedQuality, err = d.qualitySelector.SelectBestQuality(
+			availableQualities,
+			options.Quality,
+			d.config.Quality.Fallback,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to select quality: %w", err)
+		}
 	}
 
 	// Prepare download options
 	downloadOptions := &YtdlpOptions{
 		URL:            url,
 		Quality:        selectedQuality,
+		Format:         requestedFormat,
+		AudioQuality:   d.config.Quality.AudioQuality,
 		OutputDir:      options.OutputDir,
 		OutputTemplate: options.OutputTemplate,
 		AuthArgs:       nil, // will be set by auth provider
