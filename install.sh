@@ -101,11 +101,15 @@ main() {
 
   case "$os_name" in
     darwin)
-      if ! has_cmd brew; then
-        die "Homebrew not found. Please install Homebrew first: https://brew.sh/"
+      if has_cmd yt-dlp; then
+        log "yt-dlp already installed: $(command -v yt-dlp)"
+      else
+        if ! has_cmd brew; then
+          die "Homebrew not found. Please install Homebrew first: https://brew.sh/"
+        fi
+        log "Installing yt-dlp via Homebrew"
+        install_with_brew yt-dlp
       fi
-      log "Installing/upgrading yt-dlp via Homebrew"
-      install_with_brew yt-dlp
       ;;
     windows)
       log "Installing/upgrading yt-dlp on Windows (winget/choco/scoop)"
@@ -124,13 +128,41 @@ main() {
       ;;
   esac
 
-  log "Installing u2b_download via go install"
-  GOPROXY="${GOPROXY:-direct}" go install "${REPO_MODULE}@main"
+  local gobin
+  gobin="$(go env GOBIN)"
+  if [[ -z "$gobin" ]]; then
+    gobin="$(go env GOPATH)/bin"
+  fi
+  mkdir -p "$gobin"
+
+  if [[ -f "go.mod" ]]; then
+    log "Building and installing from local repository"
+    go build -o "$gobin/u2b_download" .
+  else
+    log "Installing u2b_download via go install"
+    GOPROXY="${GOPROXY:-direct}" go install "${REPO_MODULE}@main"
+  fi
+  ln -sf "$gobin/u2b_download" "$gobin/u2b"
+
+  local local_bin="$HOME/.local/bin"
+  if [[ -d "$local_bin" ]] || [[ ":$PATH:" == *":$local_bin:"* ]]; then
+    mkdir -p "$local_bin"
+    rm -f "$local_bin/u2b_download" "$local_bin/u2b"
+    cp "$gobin/u2b_download" "$local_bin/u2b_download"
+    chmod +x "$local_bin/u2b_download"
+    ln -sf "$local_bin/u2b_download" "$local_bin/u2b"
+  fi
 
   log "Install complete."
+  if has_cmd u2b; then
+    log "u2b:          $(command -v u2b)"
+  fi
   if has_cmd u2b_download; then
     log "u2b_download: $(command -v u2b_download)"
   fi
+
+  log "Deploying u2b Brave/Chrome browser extension"
+  "$gobin/u2b" ext install || warn "Browser extension setup skipped"
 }
 
 main "$@"

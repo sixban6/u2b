@@ -4,7 +4,16 @@ import (
 	"testing"
 
 	u2bcmd "git.sr.ht/~sixban/u2b_download/cmd"
+	"git.sr.ht/~sixban/u2b_download/downloader"
 )
+
+func TestSanitizeURL(t *testing.T) {
+	got := downloader.SanitizeURL(`https://www.youtube.com/watch\?v\=qnveqytjyMI\&list\=abc`)
+	want := "https://www.youtube.com/watch?v=qnveqytjyMI&list=abc"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
 
 func TestBuildOutputTemplateForFilename(t *testing.T) {
 	tests := []struct {

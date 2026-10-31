@@ -32,6 +32,7 @@ func LoadConfig(configPath string) (*Config, error) {
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")
 		v.AddConfigPath(".")
+		v.AddConfigPath("$HOME/u2b")
 		v.AddConfigPath("$HOME/.u2b_download")
 		v.AddConfigPath("/etc/u2b_download")
 	}

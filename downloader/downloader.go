@@ -81,10 +81,11 @@ type DownloadProgress struct {
 
 // YouTubeDownloader implements the Downloader interface using yt-dlp
 type YouTubeDownloader struct {
-	config          *config.Config
-	authProvider    AuthProvider
-	qualitySelector QualitySelector
-	ytdlp           *YtdlpExecutor
+	config             *config.Config
+	authProvider       AuthProvider
+	qualitySelector    QualitySelector
+	ytdlp              *YtdlpExecutor
+	useBrowserFallback bool
 }
 
 // NewYouTubeDownloader creates a new YouTube downloader instance
@@ -116,14 +117,25 @@ func NewYouTubeDownloader(cfg *config.Config) (*YouTubeDownloader, error) {
 	}, nil
 }
 
+// SanitizeURL removes shell-escaped backslashes (e.g. \? \= \& from zsh url-quote-magic) in HTTP(S) URLs.
+func SanitizeURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return strings.ReplaceAll(trimmed, `\`, "")
+	}
+	return trimmed
+}
+
 // Download implements the Downloader interface
 func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *config.DownloadOptions) (*DownloadResult, error) {
+	url = SanitizeURL(url)
 	if url == "" {
 		return nil, fmt.Errorf("URL cannot be empty")
 	}
 	if options == nil {
 		return nil, fmt.Errorf("download options cannot be nil")
 	}
+	options.URL = url
 
 	// Validate authentication before starting download
 	if err := d.ValidateAuth(ctx); err != nil {
@@ -166,7 +178,7 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *c
 	}
 
 	// Add authentication arguments
-	authArgs, err := d.authProvider.GetAuthArgs()
+	authArgs, err := d.getEffectiveAuthArgs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get auth args: %w", err)
 	}
@@ -176,8 +188,15 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *c
 	result, err := d.ytdlp.Download(ctx, downloadOptions)
 	if err != nil {
 		fallbackArgs, ok := d.getBrowserFallbackAuthArgs()
-		if ok && NeedsBrowserAuthRetry(err) {
+		if ok && !d.useBrowserFallback && NeedsBrowserAuthRetry(err) {
+			d.useBrowserFallback = true
 			downloadOptions.AuthArgs = fallbackArgs
+			result, err = d.ytdlp.Download(ctx, downloadOptions)
+		}
+	}
+	if err != nil {
+		// Fallback: check if local yt-dlp is outdated, upgrade, and retry once
+		if upgraded, _ := d.ytdlp.TryUpgradeIfOutdated(ctx); upgraded {
 			result, err = d.ytdlp.Download(ctx, downloadOptions)
 		}
 	}
@@ -189,6 +208,7 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *c
 		}, err
 	}
 
+	result.VideoInfo = videoInfo
 	return result, nil
 }
 
@@ -199,12 +219,13 @@ func (d *YouTubeDownloader) ValidateAuth(ctx context.Context) error {
 
 // GetVideoInfo implements the Downloader interface
 func (d *YouTubeDownloader) GetVideoInfo(ctx context.Context, url string) (*config.VideoInfo, error) {
+	url = SanitizeURL(url)
 	if url == "" {
 		return nil, fmt.Errorf("URL cannot be empty")
 	}
 
 	// Get authentication arguments
-	authArgs, err := d.authProvider.GetAuthArgs()
+	authArgs, err := d.getEffectiveAuthArgs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get auth args: %w", err)
 	}
@@ -216,8 +237,18 @@ func (d *YouTubeDownloader) GetVideoInfo(ctx context.Context, url string) (*conf
 	}
 
 	fallbackArgs, ok := d.getBrowserFallbackAuthArgs()
-	if ok && NeedsBrowserAuthRetry(err) {
-		return d.ytdlp.GetVideoInfo(ctx, url, fallbackArgs)
+	if ok && !d.useBrowserFallback && NeedsBrowserAuthRetry(err) {
+		d.useBrowserFallback = true
+		authArgs = fallbackArgs
+		videoInfo, err = d.ytdlp.GetVideoInfo(ctx, url, authArgs)
+		if err == nil {
+			return videoInfo, nil
+		}
+	}
+
+	// Fallback: check if local yt-dlp is outdated, upgrade, and retry once
+	if upgraded, _ := d.ytdlp.TryUpgradeIfOutdated(ctx); upgraded {
+		return d.ytdlp.GetVideoInfo(ctx, url, authArgs)
 	}
 
 	return nil, err
@@ -225,12 +256,13 @@ func (d *YouTubeDownloader) GetVideoInfo(ctx context.Context, url string) (*conf
 
 // GetPlaylistInfo implements the Downloader interface
 func (d *YouTubeDownloader) GetPlaylistInfo(ctx context.Context, url string) (*config.VideoInfo, error) {
+	url = SanitizeURL(url)
 	if url == "" {
 		return nil, fmt.Errorf("URL cannot be empty")
 	}
 
 	// Get authentication arguments
-	authArgs, err := d.authProvider.GetAuthArgs()
+	authArgs, err := d.getEffectiveAuthArgs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get auth args: %w", err)
 	}
@@ -242,11 +274,30 @@ func (d *YouTubeDownloader) GetPlaylistInfo(ctx context.Context, url string) (*c
 	}
 
 	fallbackArgs, ok := d.getBrowserFallbackAuthArgs()
-	if ok && NeedsBrowserAuthRetry(err) {
-		return d.ytdlp.GetPlaylistInfo(ctx, url, fallbackArgs)
+	if ok && !d.useBrowserFallback && NeedsBrowserAuthRetry(err) {
+		d.useBrowserFallback = true
+		authArgs = fallbackArgs
+		playlistInfo, err = d.ytdlp.GetPlaylistInfo(ctx, url, authArgs)
+		if err == nil {
+			return playlistInfo, nil
+		}
+	}
+
+	// Fallback: check if local yt-dlp is outdated, upgrade, and retry once
+	if upgraded, _ := d.ytdlp.TryUpgradeIfOutdated(ctx); upgraded {
+		return d.ytdlp.GetPlaylistInfo(ctx, url, authArgs)
 	}
 
 	return nil, err
+}
+
+func (d *YouTubeDownloader) getEffectiveAuthArgs() ([]string, error) {
+	if d.useBrowserFallback {
+		if fallbackArgs, ok := d.getBrowserFallbackAuthArgs(); ok {
+			return fallbackArgs, nil
+		}
+	}
+	return d.authProvider.GetAuthArgs()
 }
 
 // GetAvailableQualities implements the Downloader interface

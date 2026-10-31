@@ -1,4 +1,4 @@
-package downloader
+package test
 
 import (
 	"os"
@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"git.sr.ht/~sixban/u2b_download/config"
+	"git.sr.ht/~sixban/u2b_download/downloader"
 )
 
 func TestBuildDownloadArgsMP3(t *testing.T) {
-	y := &YtdlpExecutor{config: config.DefaultConfig()}
+	y := &downloader.YtdlpExecutor{Config: config.DefaultConfig()}
 
-	args := y.buildDownloadArgs(&YtdlpOptions{
+	args := y.BuildDownloadArgs(&downloader.YtdlpOptions{
 		URL:            "https://example.com/watch?v=abc123",
 		Quality:        "1080",
 		Format:         config.OutputFormatMP3,
@@ -41,17 +42,20 @@ func TestBuildDownloadArgsMP3(t *testing.T) {
 }
 
 func TestBuildDownloadArgsVideoMode(t *testing.T) {
-	y := &YtdlpExecutor{config: config.DefaultConfig()}
+	y := &downloader.YtdlpExecutor{Config: config.DefaultConfig()}
 
-	args := y.buildDownloadArgs(&YtdlpOptions{
+	args := y.BuildDownloadArgs(&downloader.YtdlpOptions{
 		URL:            "https://example.com/watch?v=abc123",
 		Quality:        config.Quality720p,
 		OutputDir:      "/tmp",
 		OutputTemplate: "%(title)s.%(ext)s",
 	})
 
-	if !hasArgPair(args, "--format", "best[height<=720]/best") {
-		t.Fatalf("expected video mode to use quality selector, args: %v", args)
+	if !hasArgPair(args, "--format", "bestvideo[height<=720]+bestaudio/best[height<=720]/best") {
+		t.Fatalf("expected video mode to use DASH video+audio quality selector, args: %v", args)
+	}
+	if !hasArgPair(args, "--merge-output-format", "mp4") {
+		t.Fatalf("expected video mode to set --merge-output-format mp4, args: %v", args)
 	}
 	if hasArg(args, "--extract-audio") {
 		t.Fatalf("did not expect --extract-audio in video mode, args: %v", args)
@@ -62,9 +66,9 @@ func TestBuildDownloadArgsVideoMode(t *testing.T) {
 }
 
 func TestBuildDownloadArgsMP3MapsNamedAudioQuality(t *testing.T) {
-	y := &YtdlpExecutor{config: config.DefaultConfig()}
+	y := &downloader.YtdlpExecutor{Config: config.DefaultConfig()}
 
-	args := y.buildDownloadArgs(&YtdlpOptions{
+	args := y.BuildDownloadArgs(&downloader.YtdlpOptions{
 		URL:            "https://example.com/watch?v=abc123",
 		Format:         config.OutputFormatMP3,
 		AudioQuality:   "best",
@@ -78,8 +82,8 @@ func TestBuildDownloadArgsMP3MapsNamedAudioQuality(t *testing.T) {
 }
 
 func TestParseDownloadResultUsesDetectedExtension(t *testing.T) {
-	y := &YtdlpExecutor{config: config.DefaultConfig()}
-	result := &DownloadResult{}
+	y := &downloader.YtdlpExecutor{Config: config.DefaultConfig()}
+	result := &downloader.DownloadResult{}
 
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "sample_track.mp3")
@@ -87,13 +91,13 @@ func TestParseDownloadResultUsesDetectedExtension(t *testing.T) {
 		t.Fatalf("failed to prepare test file: %v", err)
 	}
 
-	err := y.parseDownloadResult(result, []string{
+	err := y.ParseDownloadResult(result, []string{
 		"[download] Destination: " + filePath,
-	}, &YtdlpOptions{
+	}, &downloader.YtdlpOptions{
 		Format: config.OutputFormatMP3,
 	})
 	if err != nil {
-		t.Fatalf("parseDownloadResult returned error: %v", err)
+		t.Fatalf("ParseDownloadResult returned error: %v", err)
 	}
 
 	if result.FilePath != filePath {
@@ -104,6 +108,47 @@ func TestParseDownloadResultUsesDetectedExtension(t *testing.T) {
 	}
 	if result.FileSize == 0 {
 		t.Fatalf("expected non-zero file size, got %d", result.FileSize)
+	}
+}
+
+func TestParseDownloadResultPrefersMergedFile(t *testing.T) {
+	y := &downloader.YtdlpExecutor{Config: config.DefaultConfig()}
+	result := &downloader.DownloadResult{}
+
+	tmpDir := t.TempDir()
+	mergedPath := filepath.Join(tmpDir, "video.mp4")
+	if err := os.WriteFile(mergedPath, []byte("merged-video-content"), 0644); err != nil {
+		t.Fatalf("failed to prepare merged file: %v", err)
+	}
+
+	err := y.ParseDownloadResult(result, []string{
+		"[download] Destination: " + filepath.Join(tmpDir, "video.f399.mp4"),
+		"[download] Destination: " + filepath.Join(tmpDir, "video.f251.webm"),
+		`[Merger] Merging formats into "` + mergedPath + `"`,
+	}, &downloader.YtdlpOptions{
+		Quality: "1080",
+	})
+	if err != nil {
+		t.Fatalf("ParseDownloadResult returned error: %v", err)
+	}
+
+	if result.FilePath != mergedPath {
+		t.Fatalf("expected merged file path %q, got %q", mergedPath, result.FilePath)
+	}
+	if result.Format != "mp4" {
+		t.Fatalf("expected format mp4, got %q", result.Format)
+	}
+}
+
+func TestCompareYtdlpVersions(t *testing.T) {
+	if downloader.CompareYtdlpVersions("2026.08.19", "2026.10.26") >= 0 {
+		t.Fatalf("expected 2026.08.19 < 2026.10.26")
+	}
+	if downloader.CompareYtdlpVersions("2026.10.26", "2026.10.26") != 0 {
+		t.Fatalf("expected 2026.10.26 == 2026.10.26")
+	}
+	if downloader.CompareYtdlpVersions("2026.11.01", "2026.10.26") <= 0 {
+		t.Fatalf("expected 2026.11.01 > 2026.10.26")
 	}
 }
 

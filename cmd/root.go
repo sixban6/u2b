@@ -21,6 +21,7 @@ var (
 	fileName    string
 	quality     string
 	format      string
+	mp3Only     bool
 	authMethod  string
 	browser     string
 	cookiesFile string
@@ -32,28 +33,31 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "u2b_download",
+	Use:   "u2b [URL]",
 	Short: "A powerful YouTube downloader with membership channel support",
-	Long: `u2b_download is a command-line tool for downloading YouTube videos, 
+	Long: `u2b (u2b_download) is a command-line tool for downloading YouTube videos, 
 including content from membership channels. It uses yt-dlp under the hood
 and supports various authentication methods including browser cookies.
 
 Examples:
-  u2b_download "https://www.youtube.com/watch?v=VIDEO_ID"
-  u2b_download download -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
-  u2b_download download -q hd1080 "https://www.youtube.com/watch?v=VIDEO_ID"
-  u2b_download download --quality hd720 --output-dir ./videos "URL"
-  u2b_download info "https://www.youtube.com/watch?v=VIDEO_ID"
-  u2b_download config init`,
-	Version: "1.0.0",
-	Args:    cobra.MaximumNArgs(1),
-	RunE:    runRoot,
+  u2b "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b -m -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b -q hd1080 "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b pl "https://www.youtube.com/playlist?list=PLAYLIST_ID"
+  u2b info "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b config init`,
+	Version:      "1.0.0",
+	Args:         cobra.ArbitraryArgs,
+	SilenceUsage: true,
+	RunE:         runRoot,
 }
 
 // downloadCmd represents the download command
 var downloadCmd = &cobra.Command{
-	Use:   "download [URL]",
-	Short: "Download video from URL",
+	Use:     "download [URL]",
+	Aliases: []string{"dl"},
+	Short:   "Download video from URL",
 	Long: `Download video from the specified URL. Supports YouTube membership videos
 when properly configured with authentication.
 
@@ -63,16 +67,18 @@ The quality parameter accepts the following values:
   - Custom heights like 1080, 720, etc.
 
 Examples:
-  u2b_download download -q hd1080 "https://www.youtube.com/watch?v=VIDEO_ID"
-  u2b_download download --quality best --output-dir ./downloads "URL"`,
+  u2b -q hd1080 "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b -m -o ./downloads -n "Star Sky" "URL"
+  u2b download --quality best --output-dir ./downloads "URL"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDownload,
 }
 
 // infoCmd represents the info command
 var infoCmd = &cobra.Command{
-	Use:   "info [URL]",
-	Short: "Get video information without downloading",
+	Use:     "info [URL]",
+	Aliases: []string{"i"},
+	Short:   "Get video information without downloading",
 	Long: `Retrieve information about a video including available qualities,
 duration, title, and other metadata without downloading the video.`,
 	Args: cobra.ExactArgs(1),
@@ -105,17 +111,18 @@ var validateConfigCmd = &cobra.Command{
 
 // downloadSeriesCmd represents the download-series command
 var downloadSeriesCmd = &cobra.Command{
-	Use:   "download-series [playlist_url_or_name]",
-	Short: "Download entire video series/playlist",
+	Use:     "download-series [playlist_url_or_name]",
+	Aliases: []string{"series", "playlist", "pl"},
+	Short:   "Download entire video series/playlist",
 	Long: `Download all videos from a YouTube playlist or series. You can provide either:
   - A playlist URL (https://www.youtube.com/playlist?list=...)
   - A video URL with playlist parameter (&list=...)
   - Or a series name to search for
 
 Examples:
-  u2b_download download-series "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID"
-  u2b_download download-series "《会员课》 日内交易理论与实盘"
-  u2b_download download-series -q hd1080 "PLAYLIST_URL"`,
+  u2b pl "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID"
+  u2b series -q hd1080 "PLAYLIST_URL"
+  u2b download-series "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDownloadSeries,
 }
@@ -128,27 +135,34 @@ func Execute() {
 	}
 }
 
+func registerDownloadFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
+	cmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
+	cmd.Flags().StringVarP(&fileName, "filename", "n", "", "set output file name (without extension)")
+	cmd.Flags().StringVarP(&format, "format", "f", "", "output format (mp3 for audio-only download)")
+	cmd.Flags().BoolVarP(&mp3Only, "mp3", "m", false, "shortcut for --format mp3 (audio-only download)")
+	cmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
+	cmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction (chrome, firefox, etc.)")
+	cmd.Flags().StringVar(&cookiesFile, "cookies-file", "", "path to cookies file")
+	cmd.Flags().StringVar(&proxy, "proxy", "", "proxy URL")
+	cmd.Flags().IntVar(&concurrent, "concurrent", 0, "number of concurrent downloads")
+	cmd.Flags().IntVar(&retries, "retries", 0, "number of retry attempts")
+	cmd.Flags().StringVar(&timeout, "timeout", "", "download timeout (e.g., 30m, 1h)")
+}
+
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "config file (default is ./config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
-	// Download command flags
-	downloadCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
-	downloadCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
-	downloadCmd.Flags().StringVarP(&fileName, "filename", "n", "", "set output file name (without extension)")
-	downloadCmd.Flags().StringVar(&format, "format", "", "output format (mp3 for audio-only download)")
-	downloadCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
-	downloadCmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction (chrome, firefox, etc.)")
-	downloadCmd.Flags().StringVar(&cookiesFile, "cookies-file", "", "path to cookies file")
-	downloadCmd.Flags().StringVar(&proxy, "proxy", "", "proxy URL")
-	downloadCmd.Flags().IntVar(&concurrent, "concurrent", 0, "number of concurrent downloads")
-	downloadCmd.Flags().IntVar(&retries, "retries", 0, "number of retry attempts")
-	downloadCmd.Flags().StringVar(&timeout, "timeout", "", "download timeout (e.g., 30m, 1h)")
+	// Register download flags on both rootCmd (for direct `u2b -o ... URL`) and downloadCmd
+	registerDownloadFlags(rootCmd)
+	registerDownloadFlags(downloadCmd)
 
 	// Download series command flags
 	downloadSeriesCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
-	downloadSeriesCmd.Flags().StringVar(&format, "format", "", "output format (mp3 for audio-only download)")
+	downloadSeriesCmd.Flags().StringVarP(&format, "format", "f", "", "output format (mp3 for audio-only download)")
+	downloadSeriesCmd.Flags().BoolVarP(&mp3Only, "mp3", "m", false, "shortcut for --format mp3 (audio-only download)")
 	downloadSeriesCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
 	downloadSeriesCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
 	downloadSeriesCmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction")
@@ -163,22 +177,35 @@ func init() {
 	configCmd.AddCommand(validateConfigCmd)
 }
 
+// sanitizeInputURL removes shell-escaped backslashes (e.g. zsh's \? \= \&) from URLs.
+func sanitizeInputURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return strings.ReplaceAll(trimmed, `\`, "")
+	}
+	return trimmed
+}
+
 func runRoot(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return cmd.Help()
 	}
 
-	url := args[0]
+	if strings.HasPrefix(args[0], "chrome-extension://") {
+		return runNativeHost(cmd, args)
+	}
+
+	url := sanitizeInputURL(args[0])
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return fmt.Errorf("unknown command %q for %q", url, cmd.CommandPath())
 	}
 
-	return runDownload(downloadCmd, args)
+	return runDownload(downloadCmd, []string{url})
 }
 
 // runDownload executes the download command
 func runDownload(cmd *cobra.Command, args []string) error {
-	url := args[0]
+	url := sanitizeInputURL(args[0])
 
 	// Load configuration
 	cfg, err := loadConfig()
@@ -276,7 +303,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 
 // runDownloadSeries executes the download-series command
 func runDownloadSeries(cmd *cobra.Command, args []string) error {
-	input := args[0]
+	input := sanitizeInputURL(args[0])
 
 	// Load configuration
 	cfg, err := loadConfig()
@@ -432,7 +459,11 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 		}
 	} else if options.Quality != "" {
 		height := options.Quality
-		if height == "hd1080" || height == config.Quality1080p {
+		if height == "hd2160" || height == config.Quality2160p {
+			height = "2160"
+		} else if height == "hd1440" || height == config.Quality1440p {
+			height = "1440"
+		} else if height == "hd1080" || height == config.Quality1080p {
 			height = "1080"
 		} else if height == "hd720" || height == config.Quality720p {
 			height = "720"
@@ -443,7 +474,10 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 		} else if height == "sd240" || height == config.Quality240p {
 			height = "240"
 		}
-		args = append(args, "--format", fmt.Sprintf("best[height<=%s]/best", height))
+		args = append(args,
+			"--format", fmt.Sprintf("bestvideo[height<=%s]+bestaudio/best[height<=%s]/best", height, height),
+			"--merge-output-format", "mp4",
+		)
 	}
 
 	args = append(args, url)
@@ -460,7 +494,7 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 
 // runInfo executes the info command
 func runInfo(cmd *cobra.Command, args []string) error {
-	url := args[0]
+	url := sanitizeInputURL(args[0])
 
 	// Load configuration
 	cfg, err := loadConfig()
@@ -640,6 +674,9 @@ func overrideConfigWithFlags(cfg *config.Config) {
 }
 
 func normalizeOutputFormat(raw string) (string, error) {
+	if mp3Only && strings.TrimSpace(raw) == "" {
+		return config.OutputFormatMP3, nil
+	}
 	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), ".")
 	if normalized == "" {
 		return "", nil

@@ -1,3 +1,9 @@
 downloads
-u2b_download
 downloads_test
+test/downloads
+test/test_downloads
+u2b_download
+.DS_Store
+.idea/
+scripts/
+*.backup.*

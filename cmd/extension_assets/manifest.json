@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "u2b YouTube Downloader",
+  "version": "1.0.0",
+  "description": "右键一键调用本地 u2b 下载 YouTube 视频或 MP3 到指定目录，支持实时进度显示与 Finder 定位。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvJkpAx0Cx514wS1Zd64jvqo+h1cZ5RZNodl0UOyDQjFTuFSUOqvixD4sJY52munlOkyfiOymvbQ7joXF/WHig1N0ElxU9odOtEaYu9XrNnmrF+IB/flNvkE2XKRFGdcT9l7JPOIjU7ttFj0b0Qxcuctit78SUUcH3STGNyaqDXNc6Q6RICJ+c9qaCfMwnjqxH9uWkA0VA7N/D1DlbR4YLzVRKB+CWGYIfZwuieaS6pYJO8Z4ZxKhGp5yMaGHYYFmtgptXt+2/6Ih9LznhM+KYMKZpeog1JqHAlGmSqmxw0xwcZ9TiSUbfSjRdDgkqSZK6/7SDdwrb03MKuhlpxO2nQIDAQAB",
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "storage",
+    "notifications",
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://youtu.be/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "u2b 下载器",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -20,28 +20,47 @@ bash install.sh
 
 ## 最简使用
 
-无需先写配置，直接下载（默认参数已内置）：
+安装后同时提供简写命令 `u2b` 和完整命令 `u2b_download`（无需输入 `download` 子命令，直接支持所有参数）：
 
+1. 直接下载视频（默认参数已内置）：
 ```bash
-u2b_download "https://www.youtube.com/watch?v=VIDEO_ID"
+u2b "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
-指定下载目录和文件名（如 `Star Sky`）：
+2. 指定下载目录 `-o` 和文件名 `-n`（如 `Star Sky`）：
 ```bash
-u2b_download download -o /Volumes/lexar/音乐/高昂 -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
+u2b -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
 ```
 
-只下载 MP3 音频（不下载视频文件）：
+3. 只下载 MP3 音频（使用 `-m` 简写，或 `--format mp3`）：
 ```bash
-u2b_download download --format mp3 -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
+u2b -m -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=pICAha0nsb0"
 ```
+
+4. 下载播放列表 / 合集（使用 `pl` 或 `series`）：
+```bash
+u2b pl "https://www.youtube.com/playlist?list=PLAYLIST_ID"
+```
+
+## Brave / Chrome 浏览器右键下载插件
+
+运行 `./install.sh` 或执行以下命令会自动生成插件并注册本地通信宿主：
+```bash
+u2b ext install
+```
+- 首次启用只需在打开的 `brave://extensions` 页面开启右上角「开发者模式」，将弹出的 Finder 中的 `~/u2b/extension` 文件夹拖入浏览器（或点击「加载已解压的扩展程序」直接选择 `~/u2b/extension`）即可。
+- 在 YouTube 任意视频封面、链接或播放页点击**鼠标右键 → `📥 u2b 下载`**：
+  - 支持一键下载 1080p 视频或 MP3 音频；
+  - 支持直接选择分类子目录（自动探测外置盘或系统媒体库下的分类文件夹，也可在插件弹窗中一键更换扫描根目录或「边下边建」新分类）；
+  - 支持 **「✏️ 指定文件名 / 目录下载...」**，页内弹窗改名回车即下；
+  - 页面右上角实时显示下载进度、速度，完成后可一键点击 **「📂 在 Finder 中显示」**。
 
 ## 高级使用
 需要会员视频时，再初始化并修改配置：
 
 ```bash
-u2b_download config init
-u2b_download config validate
+u2b config init
+u2b config validate
 ```
 
 默认参数（与 `config.yaml` 对齐）
