@@ -25,7 +25,9 @@ var nativeHostCmd = &cobra.Command{
 	Short:  "Internal Chromium/Brave Native Messaging Host endpoint",
 	Hidden: true,
 	Args:   cobra.ArbitraryArgs,
-	RunE:   runNativeHost,
+	// Chromium may append browser-specific flags (e.g. --parent-window=123 on Windows).
+	DisableFlagParsing: true,
+	RunE:               runNativeHost,
 }
 
 type PresetDir struct {
@@ -70,19 +72,93 @@ func init() {
 }
 
 func ensureMacGUIPath() {
+	EnsureEnvironmentPath()
+}
+
+// EnsureEnvironmentPath ensures that tools installed in user/package manager directories
+// (Homebrew, WinGet, Scoop, ~/.local/bin, ~/u2b/bin, ffmpeg, etc.) are available in PATH,
+// even when launched in a non-interactive or GUI context.
+func EnsureEnvironmentPath() {
 	currentPath := os.Getenv("PATH")
 	homeDir, _ := os.UserHomeDir()
-	extraPaths := []string{
-		"/opt/homebrew/bin",
-		"/opt/homebrew/sbin",
-		"/usr/local/bin",
+	var extraPaths []string
+
+	if runtime.GOOS == "windows" {
+		// Read User environment Path from registry (WinGet, user-installed tools)
+		out, err := exec.Command("reg", "query", `HKCU\Environment`, "/v", "Path").Output()
+		if err == nil {
+			lines := strings.Split(string(out), "\n")
+			for _, line := range lines {
+				if strings.Contains(line, "REG_SZ") || strings.Contains(line, "REG_EXPAND_SZ") {
+					parts := strings.SplitN(line, "REG_", 2)
+					if len(parts) == 2 {
+						subParts := strings.Fields(parts[1])
+						if len(subParts) >= 2 {
+							val := strings.Join(subParts[1:], " ")
+							for _, p := range strings.Split(val, ";") {
+								p = strings.TrimSpace(p)
+								if p != "" {
+									extraPaths = append(extraPaths, p)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			extraPaths = append(extraPaths,
+				filepath.Join(localAppData, "Microsoft", "WinGet", "Links"),
+				filepath.Join(localAppData, "Microsoft", "WindowsApps"),
+			)
+			// Scan WinGet packages for ffmpeg/yt-dlp bin folders
+			packagesDir := filepath.Join(localAppData, "Microsoft", "WinGet", "Packages")
+			if entries, err := os.ReadDir(packagesDir); err == nil {
+				for _, entry := range entries {
+					if entry.IsDir() {
+						extraPaths = append(extraPaths, filepath.Join(packagesDir, entry.Name()))
+						// Also check nested bin folders like ffmpeg-.../bin
+						nested := filepath.Join(packagesDir, entry.Name())
+						if subEntries, err := os.ReadDir(nested); err == nil {
+							for _, sub := range subEntries {
+								if sub.IsDir() {
+									extraPaths = append(extraPaths,
+										filepath.Join(nested, sub.Name()),
+										filepath.Join(nested, sub.Name(), "bin"),
+									)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if homeDir != "" {
+			extraPaths = append(extraPaths,
+				filepath.Join(homeDir, "u2b", "bin"),
+				filepath.Join(homeDir, "scoop", "shims"),
+				filepath.Join(homeDir, "scoop", "apps", "ffmpeg", "current", "bin"),
+			)
+		}
+		if programData := os.Getenv("ProgramData"); programData != "" {
+			extraPaths = append(extraPaths, filepath.Join(programData, "chocolatey", "bin"))
+		}
+	} else {
+		extraPaths = []string{
+			"/opt/homebrew/bin",
+			"/opt/homebrew/sbin",
+			"/usr/local/bin",
+		}
+		if homeDir != "" {
+			extraPaths = append(extraPaths,
+				filepath.Join(homeDir, ".local", "bin"),
+				filepath.Join(homeDir, "go", "bin"),
+			)
+		}
 	}
-	if homeDir != "" {
-		extraPaths = append(extraPaths,
-			filepath.Join(homeDir, ".local", "bin"),
-			filepath.Join(homeDir, "go", "bin"),
-		)
-	}
+
 	parts := strings.Split(currentPath, string(os.PathListSeparator))
 	existing := make(map[string]bool, len(parts))
 	for _, p := range parts {
@@ -91,6 +167,7 @@ func ensureMacGUIPath() {
 	for _, p := range extraPaths {
 		if !existing[p] {
 			parts = append([]string{p}, parts...)
+			existing[p] = true
 		}
 	}
 	_ = os.Setenv("PATH", strings.Join(parts, string(os.PathListSeparator)))
@@ -749,17 +826,38 @@ func revealFileInOS(targetPath string) {
 }
 
 func pickFolderDialog(prompt string) string {
-	if runtime.GOOS != "darwin" {
-		return ""
-	}
 	if strings.TrimSpace(prompt) == "" {
 		prompt = "选择保存目录"
 	}
-	escaped := strings.ReplaceAll(prompt, `"`, `\"`)
-	script := fmt.Sprintf(`POSIX path of (choose folder with prompt "%s")`, escaped)
-	out, err := exec.Command("osascript", "-e", script).Output()
-	if err != nil {
+
+	switch runtime.GOOS {
+	case "darwin":
+		escaped := strings.ReplaceAll(prompt, `"`, `\"`)
+		script := fmt.Sprintf(`POSIX path of (choose folder with prompt "%s")`, escaped)
+		out, err := exec.Command("osascript", "-e", script).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimRight(strings.TrimSpace(string(out)), "/")
+
+	case "windows":
+		escaped := strings.ReplaceAll(prompt, `'`, `''`)
+		script := "[Console]::OutputEncoding=[Text.Encoding]::UTF8;" +
+			"Add-Type -AssemblyName System.Windows.Forms;" +
+			"$f=New-Object System.Windows.Forms.FolderBrowserDialog;" +
+			"$f.Description='" + escaped + "';" +
+			"$f.ShowNewFolderButton=$true;" +
+			"$owner=New-Object System.Windows.Forms.Form -Property @{TopMost=$true};" +
+			"if($f.ShowDialog($owner) -eq 'OK'){Write-Output $f.SelectedPath}"
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-STA", "-Command", script)
+		downloader.HideConsole(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimRight(strings.TrimSpace(string(out)), `\`)
+
+	default:
 		return ""
 	}
-	return strings.TrimRight(strings.TrimSpace(string(out)), "/")
 }

@@ -101,6 +101,7 @@ func (y *YtdlpExecutor) verifyYtdlp() error {
 // GetVersion returns the installed yt-dlp version string (e.g. "2026.08.19")
 func (y *YtdlpExecutor) GetVersion(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, "--version")
+	HideConsole(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to run yt-dlp --version: %w", err)
@@ -308,6 +309,7 @@ func (y *YtdlpExecutor) upgradeYtdlpBinary(ctx context.Context) error {
 
 	// Try yt-dlp -U (works for standalone release binaries)
 	selfUpdateCmd := exec.CommandContext(ctx, y.ytdlpPath, "-U")
+	HideConsole(selfUpdateCmd)
 	if out, err := selfUpdateCmd.CombinedOutput(); err == nil {
 		outStr := string(out)
 		if !strings.Contains(strings.ToLower(outStr), "installed yt-dlp with") &&
@@ -342,6 +344,7 @@ func (y *YtdlpExecutor) upgradeYtdlpBinary(ctx context.Context) error {
 	case "windows":
 		if wingetPath, err := exec.LookPath("winget"); err == nil {
 			cmd := exec.CommandContext(ctx, wingetPath, "upgrade", "--id", "yt-dlp.yt-dlp", "--exact", "--source", "winget", "--silent", "--accept-package-agreements", "--accept-source-agreements")
+			HideConsole(cmd)
 			if err := cmd.Run(); err == nil {
 				return nil
 			}
@@ -372,6 +375,7 @@ func (y *YtdlpExecutor) Download(ctx context.Context, options *YtdlpOptions) (*D
 
 	// Create command
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
+	HideConsole(cmd)
 
 	// Set up output capture for progress monitoring
 	stdout, err := cmd.StdoutPipe()
@@ -479,6 +483,7 @@ func (y *YtdlpExecutor) GetPlaylistInfo(ctx context.Context, url string, authArg
 	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.Config.YouTube.Client), url)
 
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
+	HideConsole(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get playlist info: %w: %s", err, strings.TrimSpace(string(output)))
@@ -518,6 +523,7 @@ func (y *YtdlpExecutor) GetVideoInfo(ctx context.Context, url string, authArgs [
 	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.Config.YouTube.Client), url)
 
 	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
+	HideConsole(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get video info: %w: %s", err, strings.TrimSpace(string(output)))
@@ -542,12 +548,79 @@ func (y *YtdlpExecutor) GetVideoInfo(ctx context.Context, url string, authArgs [
 	return &videoInfo, nil
 }
 
+// FindFFmpegLocation searches for ffmpeg executable and returns its directory.
+func FindFFmpegLocation() string {
+	if path, err := exec.LookPath("ffmpeg"); err == nil {
+		if abs, err := filepath.Abs(path); err == nil {
+			return filepath.Dir(abs)
+		}
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	var candidates []string
+
+	if runtime.GOOS == "windows" {
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData != "" {
+			packagesDir := filepath.Join(localAppData, "Microsoft", "WinGet", "Packages")
+			if entries, err := os.ReadDir(packagesDir); err == nil {
+				for _, entry := range entries {
+					if entry.IsDir() && strings.Contains(strings.ToLower(entry.Name()), "ffmpeg") {
+						base := filepath.Join(packagesDir, entry.Name())
+						candidates = append(candidates, filepath.Join(base, "bin"))
+						if subs, err := os.ReadDir(base); err == nil {
+							for _, sub := range subs {
+								if sub.IsDir() {
+									candidates = append(candidates,
+										filepath.Join(base, sub.Name(), "bin"),
+										filepath.Join(base, sub.Name()),
+									)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		if homeDir != "" {
+			candidates = append(candidates,
+				filepath.Join(homeDir, "scoop", "apps", "ffmpeg", "current", "bin"),
+				filepath.Join(homeDir, "scoop", "shims"),
+			)
+		}
+		if programData := os.Getenv("ProgramData"); programData != "" {
+			candidates = append(candidates, filepath.Join(programData, "chocolatey", "bin"))
+		}
+	} else {
+		candidates = append(candidates,
+			"/opt/homebrew/bin",
+			"/usr/local/bin",
+			"/usr/bin",
+		)
+	}
+
+	for _, c := range candidates {
+		ffExe := "ffmpeg"
+		if runtime.GOOS == "windows" {
+			ffExe = "ffmpeg.exe"
+		}
+		if _, err := os.Stat(filepath.Join(c, ffExe)); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
 // BuildDownloadArgs builds command line arguments for download
 func (y *YtdlpExecutor) BuildDownloadArgs(options *YtdlpOptions) []string {
 	args := []string{
 		"--no-warnings",
 		"--newline",
 		"--output", filepath.Join(options.OutputDir, options.OutputTemplate),
+	}
+
+	if ffmpegLoc := FindFFmpegLocation(); ffmpegLoc != "" {
+		args = append(args, "--ffmpeg-location", ffmpegLoc)
 	}
 
 	// Add playlist handling

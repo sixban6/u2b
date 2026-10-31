@@ -10,9 +10,16 @@ chmod +x install.sh
 ./install.sh
 ```
 
+Windows（PowerShell 推荐）：
+```powershell
+git clone https://github.com/sixban6/u2b_download
+cd u2b_download
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
 Windows（Git Bash）：
 ```bash
-git clone https://git.sr.ht/~sixban/u2b_download
+git clone https://github.com/sixban6/u2b_download
 cd u2b_download
 bash install.sh
 ```

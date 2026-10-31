@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -72,7 +73,7 @@ func runExtInstall(cmd *cobra.Command, args []string) error {
 		if entry.IsDir() {
 			continue
 		}
-		data, err := embeddedExtensionAssets.ReadFile(filepath.Join("extension_assets", entry.Name()))
+		data, err := embeddedExtensionAssets.ReadFile(path.Join("extension_assets", entry.Name()))
 		if err != nil {
 			return fmt.Errorf("failed to read asset %s: %w", entry.Name(), err)
 		}
@@ -94,31 +95,39 @@ func runExtInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 3. Determine installed u2b binary path and write native-host wrapper script
+	// 3. Determine installed u2b binary path and the native host launcher
 	u2bBinary := resolveInstalledU2BBinary(homeDir)
-	hostScriptPath := filepath.Join(baseDir, "native-host.sh")
-	scriptContent := fmt.Sprintf(`#!/usr/bin/env bash
+	hostLauncherPath := u2bBinary
+	if runtime.GOOS == "windows" {
+		// Chromium on Windows launches the .exe directly; u2b routes the
+		// chrome-extension:// origin argument to the native-host command itself.
+		_ = os.Remove(filepath.Join(baseDir, "native-host.sh"))
+	} else {
+		hostLauncherPath = filepath.Join(baseDir, "native-host.sh")
+		scriptContent := fmt.Sprintf(`#!/usr/bin/env bash
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:%s/.local/bin:%s/go/bin:$PATH"
 exec %q native-host "$@"
 `, homeDir, homeDir, u2bBinary)
-
-	if err := os.WriteFile(hostScriptPath, []byte(scriptContent), 0755); err != nil {
-		return fmt.Errorf("failed to write native host wrapper script: %w", err)
+		if err := os.WriteFile(hostLauncherPath, []byte(scriptContent), 0755); err != nil {
+			return fmt.Errorf("failed to write native host wrapper script: %w", err)
+		}
+		_ = os.Chmod(hostLauncherPath, 0755)
 	}
-	_ = os.Chmod(hostScriptPath, 0755)
 
-	// 4. Register Native Messaging Host for Brave (and Chrome/Chromium)
+	// 4. Register Native Messaging Host for Brave (and Chrome/Chromium/Edge)
 	origins := []string{
 		fmt.Sprintf("chrome-extension://%s/", deterministicExtensionID),
 	}
-	if pathID := computePathExtensionID(extDir); pathID != "" && pathID != deterministicExtensionID {
-		origins = append(origins, fmt.Sprintf("chrome-extension://%s/", pathID))
+	if runtime.GOOS != "windows" {
+		if pathID := computePathExtensionID(extDir); pathID != "" && pathID != deterministicExtensionID {
+			origins = append(origins, fmt.Sprintf("chrome-extension://%s/", pathID))
+		}
 	}
 
 	manifestPayload := map[string]any{
 		"name":            nativeHostName,
 		"description":     "u2b YouTube Downloader Native Messaging Host",
-		"path":            hostScriptPath,
+		"path":            hostLauncherPath,
 		"type":            "stdio",
 		"allowed_origins": origins,
 	}
@@ -127,15 +136,22 @@ exec %q native-host "$@"
 		return err
 	}
 
-	hostDirs := getNativeMessagingHostDirs(homeDir)
 	var registeredPaths []string
-	for _, dir := range hostDirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			continue
+	if runtime.GOOS == "windows" {
+		manifestFile := filepath.Join(baseDir, nativeHostName+".json")
+		if err := os.WriteFile(manifestFile, manifestBytes, 0644); err != nil {
+			return fmt.Errorf("failed to write native host manifest: %w", err)
 		}
-		targetFile := filepath.Join(dir, nativeHostName+".json")
-		if err := os.WriteFile(targetFile, manifestBytes, 0644); err == nil {
-			registeredPaths = append(registeredPaths, targetFile)
+		registeredPaths = registerWindowsNativeHost(manifestFile)
+	} else {
+		for _, dir := range getNativeMessagingHostDirs(homeDir) {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				continue
+			}
+			targetFile := filepath.Join(dir, nativeHostName+".json")
+			if err := os.WriteFile(targetFile, manifestBytes, 0644); err == nil {
+				registeredPaths = append(registeredPaths, targetFile)
+			}
 		}
 	}
 
@@ -145,31 +161,68 @@ exec %q native-host "$@"
 	}
 
 	fmt.Printf("✅ u2b 浏览器插件文件已生成: %s\n", extDir)
-	fmt.Printf("✅ Native Messaging 宿主已注册 (%d 个浏览器目录):\n", len(registeredPaths))
+	fmt.Printf("✅ Native Messaging 宿主已注册 (%d 处):\n", len(registeredPaths))
 	for _, p := range registeredPaths {
 		fmt.Printf("   - %s\n", p)
 	}
 
-	if runtime.GOOS == "darwin" {
-		// Copy extension path to clipboard for convenience
+	fileManager := "Finder"
+	switch runtime.GOOS {
+	case "darwin":
 		copyCmd := exec.Command("pbcopy")
 		copyCmd.Stdin = strings.NewReader(extDir)
 		_ = copyCmd.Run()
-
 		if !extNoOpen {
 			_ = exec.Command("open", "-a", "Brave Browser", "brave://extensions").Start()
 			_ = exec.Command("open", "-R", extDir).Start()
 		}
+	case "windows":
+		fileManager = "资源管理器"
+		copyCmd := exec.Command("clip")
+		copyCmd.Stdin = strings.NewReader(extDir)
+		_ = copyCmd.Run()
+		if !extNoOpen {
+			_ = exec.Command("explorer.exe", extDir).Start()
+		}
 	}
 
-	fmt.Printf("\n👉 首次在 Brave 中启用插件只需 1 步（已自动为你弹出窗口）：\n")
-	fmt.Printf("   1. 在 Brave 打开的 `brave://extensions` 页面右上角开启「开发者模式 (Developer mode)」\n")
-	fmt.Printf("   2. 将自动弹出的 Finder 中的 `extension` 文件夹直接拖入 `brave://extensions` 页面即可！（或点击「加载已解压的扩展程序」粘贴路径：%s）\n", extDir)
+	fmt.Printf("\n👉 首次在 Brave 中启用插件只需 1 步：\n")
+	fmt.Printf("   1. 在 Brave 地址栏打开 `brave://extensions`，右上角开启「开发者模式 (Developer mode)」\n")
+	fmt.Printf("   2. 将%s中的 `extension` 文件夹拖入该页面（或点击「加载已解压的扩展程序」选择：%s，路径已复制到剪贴板）\n", fileManager, extDir)
 
 	return nil
 }
 
+// registerWindowsNativeHost writes HKCU registry keys pointing at the manifest file
+// for Brave, Chrome, Chromium and Edge. Returns the registry keys written.
+func registerWindowsNativeHost(manifestFile string) []string {
+	keys := []string{
+		`HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\` + nativeHostName,
+		`HKCU\Software\Google\Chrome\NativeMessagingHosts\` + nativeHostName,
+		`HKCU\Software\Chromium\NativeMessagingHosts\` + nativeHostName,
+		`HKCU\Software\Microsoft\Edge\NativeMessagingHosts\` + nativeHostName,
+	}
+	var written []string
+	for _, key := range keys {
+		cmd := exec.Command("reg", "add", key, "/ve", "/t", "REG_SZ", "/d", manifestFile, "/f")
+		if err := cmd.Run(); err == nil {
+			written = append(written, key)
+		}
+	}
+	return written
+}
+
 func resolveInstalledU2BBinary(homeDir string) string {
+	if runtime.GOOS == "windows" {
+		winBin := filepath.Join(homeDir, "u2b", "bin", "u2b.exe")
+		if _, err := os.Stat(winBin); err == nil {
+			return winBin
+		}
+		if exe, err := os.Executable(); err == nil {
+			return exe
+		}
+		return winBin
+	}
 	localBin := filepath.Join(homeDir, ".local", "bin", "u2b")
 	if _, err := os.Stat(localBin); err == nil {
 		return localBin

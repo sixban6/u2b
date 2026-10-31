@@ -48,7 +48,7 @@ Examples:
   u2b info "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b config init`,
 	Version:      "1.0.0",
-	Args:         cobra.ArbitraryArgs,
+	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
 	RunE:         runRoot,
 }
@@ -129,6 +129,15 @@ Examples:
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 func Execute() {
+	EnsureEnvironmentPath()
+
+	// When Chromium launches the native host directly, it passes the caller origin
+	// (chrome-extension://<id>/) and, on Windows, an extra --parent-window=<hwnd> flag.
+	// Route these invocations to the hidden native-host command before cobra parses flags.
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "chrome-extension://") {
+		os.Args = append([]string{os.Args[0], "native-host"}, os.Args[1:]...)
+	}
+
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)
@@ -169,6 +178,11 @@ func init() {
 	downloadSeriesCmd.Flags().IntVar(&concurrent, "concurrent", 0, "number of concurrent downloads")
 
 	// Add subcommands
+	infoCmd.Flags().StringVar(&authMethod, "auth-method", "", "authentication method (none, browser, cookies_file)")
+	infoCmd.Flags().StringVar(&browser, "browser", "", "browser for cookie extraction (chrome, firefox, etc.)")
+	infoCmd.Flags().StringVar(&cookiesFile, "cookies-file", "", "path to cookies file")
+	infoCmd.Flags().StringVar(&proxy, "proxy", "", "proxy URL")
+
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(configCmd)
@@ -189,10 +203,6 @@ func sanitizeInputURL(raw string) string {
 func runRoot(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return cmd.Help()
-	}
-
-	if strings.HasPrefix(args[0], "chrome-extension://") {
-		return runNativeHost(cmd, args)
 	}
 
 	url := sanitizeInputURL(args[0])
@@ -447,6 +457,10 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 		"--extractor-args", "youtube:client=web_creator",
 	}
 
+	if ffmpegLoc := downloader.FindFFmpegLocation(); ffmpegLoc != "" {
+		args = append(args, "--ffmpeg-location", ffmpegLoc)
+	}
+
 	// Add output/quality selection
 	if strings.EqualFold(options.Format, config.OutputFormatMP3) {
 		args = append(args,
@@ -484,6 +498,7 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 
 	// Execute yt-dlp
 	cmd := exec.CommandContext(ctx, ytdlpPath, args...)
+	downloader.HideConsole(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -501,6 +516,8 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	overrideConfigWithFlags(cfg)
 
 	// Create downloader
 	d, err := downloader.NewYouTubeDownloader(cfg)
@@ -640,9 +657,15 @@ func overrideConfigWithFlags(cfg *config.Config) {
 	}
 	if browser != "" {
 		cfg.Auth.Browser = browser
+		if authMethod == "" {
+			cfg.Auth.Method = config.AuthMethodBrowser
+		}
 	}
 	if cookiesFile != "" {
 		cfg.Auth.CookiesFile = cookiesFile
+		if authMethod == "" {
+			cfg.Auth.Method = config.AuthMethodCookiesFile
+		}
 	}
 	if proxy != "" {
 		cfg.Proxy.URL = proxy
