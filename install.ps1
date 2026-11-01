@@ -1,19 +1,29 @@
-# u2b Windows installer
-# Usage (PowerShell, from repo root):
+# u2b Windows 11 / Windows 10 Installer
+# Usage:
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1
-# Optional: pass -Binary <path-to-u2b.exe> to install a prebuilt binary instead of building with Go.
+# Or one-liner remote install:
+#   irm https://raw.githubusercontent.com/sixban6/u2b_download/main/install.ps1 | iex
 
 param(
-    [string]$Binary = ""
+    [string]$Version = "latest",
+    [string]$Binary = "",
+    [switch]$Build = $false
 )
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
-function Log($msg)  { Write-Host "==> $msg" }
+$RepoOwner = "sixban6"
+$RepoName  = "u2b_download"
+$GitHubRepo = "$RepoOwner/$RepoName"
+
+function Log($msg)  { Write-Host "==> $msg" -ForegroundColor Cyan }
+function Success($msg) { Write-Host "==> $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "Warning: $msg" -ForegroundColor Yellow }
 
-function Has-Cmd($name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
+function Has-Cmd($name) {
+    return [bool](Get-Command $name -ErrorAction SilentlyContinue)
+}
 
 function Refresh-Path {
     $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -21,63 +31,157 @@ function Refresh-Path {
     $env:Path = "$machine;$user"
 }
 
-# 1. Dependencies: yt-dlp (+ ffmpeg for merging / mp3)
+# 1. Detect Architecture
+$arch = "amd64"
+if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+    $arch = "arm64"
+}
+Log "Detected OS: Windows ($arch)"
+
+# 2. Dependencies: yt-dlp & ffmpeg
+Refresh-Path
 if (Has-Cmd "yt-dlp") {
     Log "yt-dlp already installed: $((Get-Command yt-dlp).Source)"
 } elseif (Has-Cmd "winget") {
-    Log "Installing yt-dlp via winget"
-    winget install --id yt-dlp.yt-dlp --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+    Log "Installing yt-dlp via winget..."
+    try {
+        winget install --id yt-dlp.yt-dlp --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+    } catch {
+        Warn "winget failed to install yt-dlp. Continuing..."
+    }
 } elseif (Has-Cmd "scoop") {
     scoop install yt-dlp
 } elseif (Has-Cmd "choco") {
     choco install yt-dlp -y
 } else {
-    Warn "No winget/scoop/choco found. Install yt-dlp manually: https://github.com/yt-dlp/yt-dlp/wiki/Installation"
+    Warn "No package manager found. Install yt-dlp manually: https://github.com/yt-dlp/yt-dlp/wiki/Installation"
 }
 
 Refresh-Path
-if (-not (Has-Cmd "ffmpeg")) {
-    if (Has-Cmd "winget") {
-        Log "Installing ffmpeg via winget (required for 1080p merging and MP3)"
+if (Has-Cmd "ffmpeg") {
+    Log "ffmpeg already installed: $((Get-Command ffmpeg).Source)"
+} elseif (Has-Cmd "winget") {
+    Log "Installing ffmpeg via winget (required for 1080p merging and MP3)..."
+    try {
         winget install --id Gyan.FFmpeg --exact --source winget --silent --accept-package-agreements --accept-source-agreements
-    } else {
-        Warn "ffmpeg not found; 1080p merge and MP3 extraction will fail until it is installed."
+    } catch {
+        Warn "winget failed to install ffmpeg. Continuing..."
+    }
+} else {
+    Warn "ffmpeg not found; 1080p merge and MP3 extraction will fail until ffmpeg is installed."
+}
+Refresh-Path
+
+# 3. Setup install directory
+$binDir = Join-Path $env:USERPROFILE "u2b\bin"
+if (-not (Test-Path $binDir)) {
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+}
+$target = Join-Path $binDir "u2b.exe"
+$targetDownload = Join-Path $binDir "u2b_download.exe"
+
+$installed = $false
+
+# 4. Binary installation
+if ($Binary -ne "") {
+    Log "Installing provided binary: $Binary"
+    Copy-Item -Force $Binary $target
+    $installed = $true
+} elseif (-not $Build) {
+    # Attempt downloading prebuilt release from GitHub
+    $candidates = @("u2b-windows-$arch.zip")
+    if ($arch -eq "arm64") {
+        # Windows 11 ARM64 can seamlessly emulate x64 binaries as a fallback
+        $candidates += "u2b-windows-amd64.zip"
+    }
+
+    foreach ($zipName in $candidates) {
+        $downloadUrl = if ($Version -eq "latest") {
+            "https://github.com/$GitHubRepo/releases/latest/download/$zipName"
+        } else {
+            "https://github.com/$GitHubRepo/releases/download/$Version/$zipName"
+        }
+
+        Log "Downloading prebuilt release ($zipName)..."
+        $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("u2b_" + [System.Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+        $tmpZip = Join-Path $tmpDir $zipName
+
+        try {
+            $webParams = @{
+                Uri = $downloadUrl
+                OutFile = $tmpZip
+                UseBasicParsing = $true
+            }
+            if ($env:GITHUB_TOKEN) {
+                $webParams.Headers = @{ Authorization = "token $env:GITHUB_TOKEN" }
+            }
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+            Invoke-WebRequest @webParams -ErrorAction Stop
+
+            Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
+            $extractedExe = Join-Path $tmpDir "u2b.exe"
+            if (Test-Path $extractedExe) {
+                Copy-Item -Force $extractedExe $target
+                $installed = $true
+                Log "Precompiled binary installed successfully ($zipName)"
+                Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+                break
+            }
+        } catch {
+            Warn "Could not download $downloadUrl ($($_.Exception.Message))"
+        } finally {
+            if (Test-Path $tmpDir) {
+                Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
-Refresh-Path
 
-# 2. Build or copy u2b.exe into %USERPROFILE%\u2b\bin
-$binDir = Join-Path $env:USERPROFILE "u2b\bin"
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$target = Join-Path $binDir "u2b.exe"
-
-if ($Binary -ne "") {
-    Log "Installing prebuilt binary: $Binary"
-    Copy-Item -Force $Binary $target
-} elseif ((Test-Path "go.mod") -and (Has-Cmd "go")) {
-    Log "Building u2b.exe from local repository"
-    go build -o $target .
-} elseif (Has-Cmd "go") {
-    Log "Installing via go install"
-    $env:GOPROXY = if ($env:GOPROXY) { $env:GOPROXY } else { "direct" }
-    go install "github.com/sixban6/u2b_download@main"
-    $gobin = (go env GOBIN); if (-not $gobin) { $gobin = Join-Path (go env GOPATH) "bin" }
-    Copy-Item -Force (Join-Path $gobin "u2b_download.exe") $target
-} else {
-    throw "Go not found. Install Go (https://go.dev/dl/) or pass -Binary <path-to-u2b.exe>."
+# Fallback to Go build if not installed
+if (-not $installed) {
+    if (Has-Cmd "go") {
+        Log "Building u2b from Go source..."
+        if ((Test-Path "go.mod") -and (Select-String -Path "go.mod" -Pattern "u2b_download" -Quiet)) {
+            go build -trimpath -ldflags "-s -w" -o $target .
+            $installed = $true
+        } else {
+            $srcDir = Join-Path ([System.IO.Path]::GetTempPath()) ("u2b_src_" + [System.Guid]::NewGuid().ToString("N"))
+            git clone --depth 1 "https://github.com/$GitHubRepo.git" $srcDir
+            Push-Location $srcDir
+            try {
+                go build -trimpath -ldflags "-s -w" -o $target .
+                $installed = $true
+            } finally {
+                Pop-Location
+                Remove-Item -Recurse -Force $srcDir -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        throw "Failed to download prebuilt binary, and Go is not installed. Please install Go (https://go.dev/dl/) or verify internet connection to GitHub Releases."
+    }
 }
-Copy-Item -Force $target (Join-Path $binDir "u2b_download.exe")
 
-# 3. Add to user PATH
+Copy-Item -Force $target $targetDownload
+
+# 5. Add to user PATH
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if (-not ($userPath -split ";" | Where-Object { $_ -eq $binDir })) {
+$paths = $userPath -split ";" | Where-Object { $_ -ne "" }
+if (-not ($paths -contains $binDir)) {
     [Environment]::SetEnvironmentVariable("Path", "$userPath;$binDir", "User")
-    Log "Added $binDir to user PATH (open a new terminal to use 'u2b')"
+    Log "Added $binDir to User PATH"
 }
-$env:Path = "$env:Path;$binDir"
+$env:Path = "$binDir;$env:Path"
 
-Log "Install complete: $target"
+Success "Install complete: $target"
+try {
+    & $target version
+} catch {}
 
-# 4. Browser extension + Native Messaging registration
-Log "Deploying u2b Brave/Chrome/Edge browser extension"
-& $target ext install
+# 6. Browser Extension Setup
+Log "Deploying u2b Brave/Chrome/Edge browser extension..."
+try {
+    & $target ext install
+} catch {
+    Warn "Browser extension setup step skipped: $($_.Exception.Message)"
+}

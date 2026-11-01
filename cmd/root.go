@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 )
 
 var (
+	// Version info (can be set via -ldflags during build)
+	Version   = "1.0.0"
+	GitCommit = "dev"
+	BuildDate = "unknown"
+
 	configPath  string
 	verbose     bool
 	outputDir   string
@@ -47,7 +53,7 @@ Examples:
   u2b pl "https://www.youtube.com/playlist?list=PLAYLIST_ID"
   u2b info "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b config init`,
-	Version:      "1.0.0",
+	Version:      Version,
 	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
 	RunE:         runRoot,
@@ -187,8 +193,19 @@ func init() {
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(downloadSeriesCmd)
+	rootCmd.AddCommand(versionCmd)
 	configCmd.AddCommand(initConfigCmd)
 	configCmd.AddCommand(validateConfigCmd)
+
+	rootCmd.SetVersionTemplate(fmt.Sprintf("u2b version %s (commit: %s, built: %s, %s/%s)\n", Version, GitCommit, BuildDate, runtime.GOOS, runtime.GOARCH))
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print u2b version and build details",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("u2b version %s (commit: %s, built: %s, %s/%s)\n", Version, GitCommit, BuildDate, runtime.GOOS, runtime.GOARCH)
+	},
 }
 
 // sanitizeInputURL removes shell-escaped backslashes (e.g. zsh's \? \= \&) from URLs.

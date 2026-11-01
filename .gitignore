@@ -7,3 +7,7 @@ u2b_download
 .idea/
 scripts/
 *.backup.*
+dist/
+*.exe
+*.zip
+*.tar.gz

@@ -4,30 +4,27 @@
 
 ---
 
-## 🚀 最简安装
+## 🚀 极速一键安装（推荐）
+
+通过 GitHub Actions 自动编译与 Releases 发布，**无需本地安装 Go 编译环境**，秒级极速部署：
 
 ### macOS / Linux
 
-打开终端执行以下命令（统一使用 GitHub）：
+打开终端执行以下一行命令：
 
 ```bash
-git clone https://github.com/sixban6/u2b_download.git
-cd u2b_download
-chmod +x install.sh
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/sixban6/u2b_download/main/install.sh | bash
 ```
-> `install.sh` 会自动检测依赖（Homebrew / apt / dnf / pacman 等），自动补齐 `yt-dlp` 与 `ffmpeg`，编译安装并自动部署浏览器扩展。
+> 或克隆仓库后运行 `./install.sh`。脚本将自动识别系统架构（Apple Silicon M系列 / Intel x64 / Linux arm64 / amd64），优先下载官方 Release 预编译二进制，通过 Homebrew / apt / dnf 补齐 `yt-dlp` 与 `ffmpeg`，并自动部署浏览器扩展。
 
-### Windows
+### Windows 11 / Windows 10
 
-以管理员或当前用户打开 PowerShell 执行：
+以当前用户打开 PowerShell 执行以下一行命令：
 
 ```powershell
-git clone https://github.com/sixban6/u2b_download.git
-cd u2b_download
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+irm https://raw.githubusercontent.com/sixban6/u2b_download/main/install.ps1 | iex
 ```
-> `install.ps1` 会自动通过 `winget` 安装 `yt-dlp` 与 `ffmpeg`，将 `u2b` 加入用户 PATH，并自动配置浏览器 Native Messaging 通信宿主与扩展引导。
+> 或克隆仓库后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`。脚本将自动识别架构（x64 / ARM64），下载对应预编译程序，通过 Win11 自带 `winget` 自动安装 `yt-dlp` 与 `ffmpeg`，加入用户 PATH 并自动配置 Chromium 浏览器原生通信宿主。
 
 ---
 

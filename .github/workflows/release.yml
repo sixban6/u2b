@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name (e.g. v1.0.1)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Determine Version
+        id: meta
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v1.0.0"
+          fi
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and Package Binaries
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+          DATE: ${{ steps.meta.outputs.date }}
+        run: |
+          mkdir -p dist
+          LDFLAGS="-s -w -X git.sr.ht/~sixban/u2b_download/cmd.Version=${TAG} -X git.sr.ht/~sixban/u2b_download/cmd.GitCommit=${COMMIT} -X git.sr.ht/~sixban/u2b_download/cmd.BuildDate=${DATE}"
+
+          # Format: OS/ARCH/BINARY_NAME/PACKAGE_TYPE
+          TARGETS=(
+            "darwin/amd64/u2b/tar.gz"
+            "darwin/arm64/u2b/tar.gz"
+            "linux/amd64/u2b/tar.gz"
+            "linux/arm64/u2b/tar.gz"
+            "windows/amd64/u2b.exe/zip"
+            "windows/arm64/u2b.exe/zip"
+          )
+
+          for TARGET in "${TARGETS[@]}"; do
+            IFS="/" read -r OS ARCH BIN_NAME PKG_TYPE <<< "$TARGET"
+            echo "==> Building for ${OS}/${ARCH}..."
+            BUILD_DIR="build_${OS}_${ARCH}"
+            mkdir -p "$BUILD_DIR"
+            
+            CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build -ldflags "$LDFLAGS" -trimpath -o "${BUILD_DIR}/${BIN_NAME}" .
+            cp README.md LICENSE "${BUILD_DIR}/"
+
+            ARCHIVE_NAME="u2b-${OS}-${ARCH}"
+            if [ "$PKG_TYPE" = "zip" ]; then
+              (cd "$BUILD_DIR" && zip -9 -q -r "../dist/${ARCHIVE_NAME}.zip" .)
+            else
+              tar -czf "dist/${ARCHIVE_NAME}.tar.gz" -C "$BUILD_DIR" .
+            fi
+            rm -rf "$BUILD_DIR"
+          done
+
+          cd dist
+          sha256sum * > checksums.txt
+          echo "==> Artifacts checksums:"
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Release ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            dist/*
