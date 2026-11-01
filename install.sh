@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_MODULE="git.sr.ht/~sixban/u2b_download"
+REPO_MODULE="github.com/sixban6/u2b_download"
 
 log() {
   printf "==> %s\n" "$*"

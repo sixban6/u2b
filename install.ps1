@@ -60,7 +60,7 @@ if ($Binary -ne "") {
 } elseif (Has-Cmd "go") {
     Log "Installing via go install"
     $env:GOPROXY = if ($env:GOPROXY) { $env:GOPROXY } else { "direct" }
-    go install "git.sr.ht/~sixban/u2b_download@main"
+    go install "github.com/sixban6/u2b_download@main"
     $gobin = (go env GOBIN); if (-not $gobin) { $gobin = Join-Path (go env GOPATH) "bin" }
     Copy-Item -Force (Join-Path $gobin "u2b_download.exe") $target
 } else {
