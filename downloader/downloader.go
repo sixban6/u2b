@@ -201,11 +201,12 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *c
 		}
 	}
 	if err != nil {
+		formattedErr := FormatAuthError(err, d.config.Auth.Browser)
 		return &DownloadResult{
 			VideoInfo: videoInfo,
 			Success:   false,
-			Error:     err.Error(),
-		}, err
+			Error:     formattedErr.Error(),
+		}, formattedErr
 	}
 
 	result.VideoInfo = videoInfo
@@ -244,14 +245,33 @@ func (d *YouTubeDownloader) GetVideoInfo(ctx context.Context, url string) (*conf
 		if err == nil {
 			return videoInfo, nil
 		}
+
+		// If initial browser failed due to file lock or decryption, try alternate installed browsers (edge, chrome, firefox)
+		if isCookieLockOrAuthError(err) {
+			alternates := []string{"edge", "chrome", "firefox"}
+			for _, alt := range alternates {
+				if strings.EqualFold(alt, d.config.Auth.Browser) {
+					continue
+				}
+				altArgs := []string{"--cookies-from-browser", alt}
+				if altInfo, altErr := d.ytdlp.GetVideoInfo(ctx, url, altArgs); altErr == nil {
+					d.config.Auth.Browser = alt
+					return altInfo, nil
+				}
+			}
+		}
 	}
 
 	// Fallback: check if local yt-dlp is outdated, upgrade, and retry once
 	if upgraded, _ := d.ytdlp.TryUpgradeIfOutdated(ctx); upgraded {
-		return d.ytdlp.GetVideoInfo(ctx, url, authArgs)
+		info, uErr := d.ytdlp.GetVideoInfo(ctx, url, authArgs)
+		if uErr == nil {
+			return info, nil
+		}
+		err = uErr
 	}
 
-	return nil, err
+	return nil, FormatAuthError(err, d.config.Auth.Browser)
 }
 
 // GetPlaylistInfo implements the Downloader interface
@@ -281,14 +301,32 @@ func (d *YouTubeDownloader) GetPlaylistInfo(ctx context.Context, url string) (*c
 		if err == nil {
 			return playlistInfo, nil
 		}
+
+		if isCookieLockOrAuthError(err) {
+			alternates := []string{"edge", "chrome", "firefox"}
+			for _, alt := range alternates {
+				if strings.EqualFold(alt, d.config.Auth.Browser) {
+					continue
+				}
+				altArgs := []string{"--cookies-from-browser", alt}
+				if altInfo, altErr := d.ytdlp.GetPlaylistInfo(ctx, url, altArgs); altErr == nil {
+					d.config.Auth.Browser = alt
+					return altInfo, nil
+				}
+			}
+		}
 	}
 
 	// Fallback: check if local yt-dlp is outdated, upgrade, and retry once
 	if upgraded, _ := d.ytdlp.TryUpgradeIfOutdated(ctx); upgraded {
-		return d.ytdlp.GetPlaylistInfo(ctx, url, authArgs)
+		pInfo, uErr := d.ytdlp.GetPlaylistInfo(ctx, url, authArgs)
+		if uErr == nil {
+			return pInfo, nil
+		}
+		err = uErr
 	}
 
-	return nil, err
+	return nil, FormatAuthError(err, d.config.Auth.Browser)
 }
 
 func (d *YouTubeDownloader) getEffectiveAuthArgs() ([]string, error) {
@@ -349,4 +387,37 @@ func NeedsBrowserAuthRetry(err error) bool {
 		strings.Contains(msg, "sign in to confirm you’re not a bot") ||
 		strings.Contains(msg, "use --cookies-from-browser") ||
 		strings.Contains(msg, "use --cookies")
+}
+
+func isCookieLockOrAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "could not copy chrome cookie database") ||
+		(strings.Contains(msg, "permission denied") && strings.Contains(msg, "cookies")) ||
+		strings.Contains(msg, "failed to decrypt with dpapi") ||
+		strings.Contains(msg, "sharing violation")
+}
+
+// FormatAuthError converts cryptic yt-dlp cookie lock errors into clear actionable instructions
+func FormatAuthError(err error, browser string) error {
+	if err == nil {
+		return nil
+	}
+	if !isCookieLockOrAuthError(err) {
+		return err
+	}
+
+	currentBrowser := strings.ToUpper(browser)
+	if currentBrowser == "" {
+		currentBrowser = "BRAVE / CHROME"
+	}
+
+	return fmt.Errorf("检测到浏览器 Cookie 数据库读取受阻（%s 当前正在运行并独占锁定了 Cookie 数据库）。\n\n"+
+		"💡 解决方案（任选一种即可）：\n"+
+		"   1. 完全退出 %s 浏览器后台进程后重新运行命令；\n"+
+		"   2. 或在浏览器中使用 u2b 扩展右键一键下载（扩展直接在内存中传递 Cookie，无需关闭浏览器）；\n"+
+		"   3. 或通过浏览器扩展导出 cookies.txt，执行：u2b --cookies-file ./cookies.txt <URL>\n\n"+
+		"原始报错: %w", currentBrowser, currentBrowser, err)
 }

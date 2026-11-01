@@ -10,7 +10,8 @@
     "storage",
     "notifications",
     "activeTab",
-    "tabs"
+    "tabs",
+    "cookies"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

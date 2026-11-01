@@ -376,6 +376,27 @@ function isYouTubeWatchOrPlaylist(u) {
   );
 }
 
+async function getYouTubeCookiesNetscape() {
+  if (!chrome.cookies || !chrome.cookies.getAll) return "";
+  try {
+    const cookies = await chrome.cookies.getAll({ domain: "youtube.com" });
+    if (!cookies || !cookies.length) return "";
+    const lines = ["# Netscape HTTP Cookie File", "# Exported automatically by u2b extension"];
+    for (const c of cookies) {
+      let domain = c.domain || ".youtube.com";
+      const flag = domain.startsWith(".") ? "TRUE" : "FALSE";
+      const path = c.path || "/";
+      const secure = c.secure ? "TRUE" : "FALSE";
+      const expiration = c.expirationDate ? Math.round(c.expirationDate) : Math.round(Date.now() / 1000) + 86400 * 30;
+      lines.push(`${domain}\t${flag}\t${path}\t${secure}\t${expiration}\t${c.name}\t${c.value}`);
+    }
+    return lines.join("\n");
+  } catch (err) {
+    console.warn("Could not export youtube cookies from extension:", err);
+    return "";
+  }
+}
+
 function startDownloadTask({ url, title, format, quality, outputDir, filename, isPlaylist, tabId }) {
   const id = "task-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
   const task = {
@@ -401,26 +422,29 @@ function startDownloadTask({ url, title, format, quality, outputDir, filename, i
   notifyTab(tabId, { type: "task_update", task });
   broadcastToExtension({ type: "task_update", task });
 
-  const ok = sendNative({
-    type: "download",
-    id: task.id,
-    url: task.url,
-    title: task.title,
-    format: task.format,
-    quality: task.quality,
-    outputDir: task.outputDir,
-    filename: task.filename,
-    isPlaylist: task.isPlaylist
-  });
+  getYouTubeCookiesNetscape().then((cookiesStr) => {
+    const ok = sendNative({
+      type: "download",
+      id: task.id,
+      url: task.url,
+      title: task.title,
+      format: task.format,
+      quality: task.quality,
+      outputDir: task.outputDir,
+      filename: task.filename,
+      isPlaylist: task.isPlaylist,
+      cookies: cookiesStr || ""
+    });
 
-  if (!ok) {
-    task.status = "error";
-    task.error = "无法连接本地 u2b 服务，请确认已运行 u2b ext install";
-    activeTasks.set(id, task);
-    persistTasks();
-    updateBadge();
-    notifyTab(tabId, { type: "task_update", task });
-  }
+    if (!ok) {
+      task.status = "error";
+      task.error = "无法连接本地 u2b 服务，请确认已运行 u2b ext install";
+      activeTasks.set(id, task);
+      persistTasks();
+      updateBadge();
+      notifyTab(tabId, { type: "task_update", task });
+    }
+  });
 
   return task;
 }

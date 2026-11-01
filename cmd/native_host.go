@@ -65,6 +65,7 @@ type nativeIncomingMessage struct {
 	Path       string                  `json:"path"`
 	Name       string                  `json:"name"`
 	Config     *ExtensionPresetsConfig `json:"config"`
+	Cookies    string                  `json:"cookies"`
 }
 
 func init() {
@@ -404,6 +405,19 @@ func handleNativeDownload(ctx context.Context, msg nativeIncomingMessage, sendMs
 
 	// Refresh config so if outputDir is a newly created subfolder under rootDir, it appears in menus right away!
 	sendConfig(sendMsg)
+
+	// If browser extension passed cookies in-memory, write to temporary Netscape cookies file
+	// This cleanly bypasses Windows SQLite database file locking!
+	if strings.TrimSpace(msg.Cookies) != "" {
+		tmpCookie, err := os.CreateTemp("", "u2b_ext_cookies_*.txt")
+		if err == nil {
+			defer os.Remove(tmpCookie.Name())
+			_, _ = tmpCookie.WriteString(msg.Cookies)
+			_ = tmpCookie.Close()
+			cfg.Auth.Method = config.AuthMethodCookiesFile
+			cfg.Auth.CookiesFile = tmpCookie.Name()
+		}
+	}
 
 	sendMsg(map[string]any{
 		"type":       "started",
