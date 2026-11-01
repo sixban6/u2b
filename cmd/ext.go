@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"embed"
@@ -34,21 +35,30 @@ var extNoOpen bool
 var extCmd = &cobra.Command{
 	Use:     "ext",
 	Aliases: []string{"extension", "plugin"},
-	Short:   "Install or manage the u2b Brave/Chrome browser extension",
-	Long:    `Install and configure the u2b browser extension and Native Messaging Host for Brave/Chrome.`,
+	Short:   "Install or manage the u2b browser extension",
+	Long:    `Install and configure the u2b browser extension and Native Messaging Host for Chromium-based browsers (Brave, Chrome, Edge).`,
 	RunE:    runExtInstall,
 }
 
 var extInstallCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Install the u2b browser extension and register Brave Native Messaging Host",
+	Short: "Install the u2b browser extension and register Native Messaging Host",
 	RunE:  runExtInstall,
 }
 
 func init() {
-	extCmd.PersistentFlags().BoolVar(&extNoOpen, "no-open", false, "do not automatically open Brave and Finder after installation")
+	extCmd.PersistentFlags().BoolVar(&extNoOpen, "no-open", false, "do not automatically open browser and file manager after installation")
 	extCmd.AddCommand(extInstallCmd)
 	rootCmd.AddCommand(extCmd)
+}
+
+// BrowserInfo contains detection metadata for a supported Chromium browser.
+type BrowserInfo struct {
+	ID          string // "brave", "chrome", "edge", "chromium"
+	Name        string // e.g. "Brave Browser"
+	Scheme      string // e.g. "brave://extensions"
+	ExecPath    string // path to binary or macOS app bundle
+	DownloadURL string
 }
 
 func runExtInstall(cmd *cobra.Command, args []string) error {
@@ -114,7 +124,7 @@ exec %q native-host "$@"
 		_ = os.Chmod(hostLauncherPath, 0755)
 	}
 
-	// 4. Register Native Messaging Host for Brave (and Chrome/Chromium/Edge)
+	// 4. Register Native Messaging Host for Brave, Chrome, Chromium, Edge
 	origins := []string{
 		fmt.Sprintf("chrome-extension://%s/", deterministicExtensionID),
 	}
@@ -166,31 +176,283 @@ exec %q native-host "$@"
 		fmt.Printf("   - %s\n", p)
 	}
 
-	fileManager := "Finder"
-	switch runtime.GOOS {
-	case "darwin":
-		copyCmd := exec.Command("pbcopy")
-		copyCmd.Stdin = strings.NewReader(extDir)
-		_ = copyCmd.Run()
-		if !extNoOpen {
-			_ = exec.Command("open", "-a", "Brave Browser", "brave://extensions").Start()
-			_ = exec.Command("open", "-R", extDir).Start()
+	// 6. Detect installed browsers and guide onboarding
+	browsers := detectInstalledBrowsers()
+	if len(browsers) == 0 {
+		fmt.Println("\n⚠️  未检测到支持的 Chromium 浏览器 (Brave / Chrome / Edge)！")
+		fmt.Println("   u2b 网页右键快捷下载扩展需要基于 Chromium 的浏览器。")
+		fmt.Println("   - 推荐首选: Brave (https://brave.com/download/ - 原生注重隐私且对视频/音频解析最友好)")
+		fmt.Println("   - 备选推荐: Google Chrome (https://www.google.com/chrome/)")
+		fmt.Println()
+
+		if isTerminal() && !extNoOpen {
+			fmt.Print("👉 是否立即在默认浏览器中打开 Brave 官网下载页？[Y/n]: ")
+			reader := bufio.NewReader(os.Stdin)
+			line, _ := reader.ReadString('\n')
+			ans := strings.TrimSpace(line)
+			if ans == "" || strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes") {
+				_ = openURL("https://brave.com/download/")
+				fmt.Println("🚀 已为您打开 Brave 官网下载页。安装浏览器后，再次运行 `u2b ext install` 即可自动完成插件挂载！")
+			} else {
+				fmt.Println("提示: 安装浏览器后，再次运行 `u2b ext install` 即可自动完成插件挂载。")
+			}
+		} else {
+			fmt.Println("提示: 请先安装 Brave 或 Google Chrome，然后再次运行 `u2b ext install`。")
 		}
-	case "windows":
+		return nil
+	}
+
+	fmt.Printf("\n🔍 检测到支持的浏览器 (%d 个):\n", len(browsers))
+	for i, b := range browsers {
+		tag := ""
+		if i == 0 {
+			tag = " (默认首选)"
+		}
+		fmt.Printf("   - %s%s\n", b.Name, tag)
+	}
+
+	primary := browsers[0]
+	fileManager := "Finder"
+	if runtime.GOOS == "windows" {
 		fileManager = "资源管理器"
-		copyCmd := exec.Command("clip")
-		copyCmd.Stdin = strings.NewReader(extDir)
-		_ = copyCmd.Run()
-		if !extNoOpen {
-			_ = exec.Command("explorer.exe", extDir).Start()
+	}
+
+	copyToClipboard(extDir)
+
+	if !extNoOpen {
+		launchBrowserAndFolder(primary, extDir)
+	}
+
+	fmt.Printf("\n👉 首次在 %s 中启用插件只需 1 步：\n", primary.Name)
+	fmt.Printf("   1. 在 %s 打开 `%s`，右上角开启「开发者模式 (Developer mode)」\n", primary.Name, primary.Scheme)
+	fmt.Printf("   2. 将%s中的 `extension` 文件夹拖入该页面（或点击「加载已解压的扩展程序」选择该路径，已复制到剪贴板）\n", fileManager)
+	fmt.Printf("      文件夹路径: %s\n", extDir)
+
+	return nil
+}
+
+// detectInstalledBrowsers detects installed Chromium browsers in priority order:
+// Brave -> Google Chrome -> Microsoft Edge -> Chromium.
+func detectInstalledBrowsers() []BrowserInfo {
+	var detected []BrowserInfo
+	homeDir, _ := os.UserHomeDir()
+
+	specs := []struct {
+		id          string
+		name        string
+		scheme      string
+		downloadURL string
+		winPaths    func() []string
+		macPaths    []string
+		linuxCmds   []string
+	}{
+		{
+			id:          "brave",
+			name:        "Brave Browser",
+			scheme:      "brave://extensions",
+			downloadURL: "https://brave.com/download/",
+			winPaths: func() []string {
+				local := os.Getenv("LOCALAPPDATA")
+				prog := os.Getenv("ProgramFiles")
+				prog86 := os.Getenv("ProgramFiles(x86)")
+				return []string{
+					filepath.Join(local, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+					filepath.Join(prog, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+					filepath.Join(prog86, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+				}
+			},
+			macPaths: []string{
+				"/Applications/Brave Browser.app",
+				filepath.Join(homeDir, "Applications", "Brave Browser.app"),
+			},
+			linuxCmds: []string{"brave-browser", "brave"},
+		},
+		{
+			id:          "chrome",
+			name:        "Google Chrome",
+			scheme:      "chrome://extensions",
+			downloadURL: "https://www.google.com/chrome/",
+			winPaths: func() []string {
+				local := os.Getenv("LOCALAPPDATA")
+				prog := os.Getenv("ProgramFiles")
+				prog86 := os.Getenv("ProgramFiles(x86)")
+				return []string{
+					filepath.Join(prog, "Google", "Chrome", "Application", "chrome.exe"),
+					filepath.Join(prog86, "Google", "Chrome", "Application", "chrome.exe"),
+					filepath.Join(local, "Google", "Chrome", "Application", "chrome.exe"),
+				}
+			},
+			macPaths: []string{
+				"/Applications/Google Chrome.app",
+				filepath.Join(homeDir, "Applications", "Google Chrome.app"),
+			},
+			linuxCmds: []string{"google-chrome", "google-chrome-stable"},
+		},
+		{
+			id:          "edge",
+			name:        "Microsoft Edge",
+			scheme:      "edge://extensions",
+			downloadURL: "https://www.microsoft.com/edge",
+			winPaths: func() []string {
+				local := os.Getenv("LOCALAPPDATA")
+				prog := os.Getenv("ProgramFiles")
+				prog86 := os.Getenv("ProgramFiles(x86)")
+				paths := []string{
+					filepath.Join(prog86, "Microsoft", "Edge", "Application", "msedge.exe"),
+					filepath.Join(prog, "Microsoft", "Edge", "Application", "msedge.exe"),
+					filepath.Join(local, "Microsoft", "Edge", "Application", "msedge.exe"),
+				}
+				if matches, _ := filepath.Glob(filepath.Join(prog86, "Microsoft", "EdgeCore", "*", "msedge.exe")); len(matches) > 0 {
+					paths = append(paths, matches...)
+				}
+				if matches, _ := filepath.Glob(filepath.Join(prog, "Microsoft", "EdgeCore", "*", "msedge.exe")); len(matches) > 0 {
+					paths = append(paths, matches...)
+				}
+				return paths
+			},
+			macPaths: []string{
+				"/Applications/Microsoft Edge.app",
+				filepath.Join(homeDir, "Applications", "Microsoft Edge.app"),
+			},
+			linuxCmds: []string{"microsoft-edge", "microsoft-edge-stable"},
+		},
+		{
+			id:          "chromium",
+			name:        "Chromium",
+			scheme:      "chrome://extensions",
+			downloadURL: "https://www.chromium.org/",
+			winPaths: func() []string {
+				local := os.Getenv("LOCALAPPDATA")
+				prog := os.Getenv("ProgramFiles")
+				prog86 := os.Getenv("ProgramFiles(x86)")
+				return []string{
+					filepath.Join(local, "Chromium", "Application", "chrome.exe"),
+					filepath.Join(prog, "Chromium", "Application", "chrome.exe"),
+					filepath.Join(prog86, "Chromium", "Application", "chrome.exe"),
+				}
+			},
+			macPaths: []string{
+				"/Applications/Chromium.app",
+				filepath.Join(homeDir, "Applications", "Chromium.app"),
+			},
+			linuxCmds: []string{"chromium", "chromium-browser"},
+		},
+	}
+
+	for _, spec := range specs {
+		var foundPath string
+		switch runtime.GOOS {
+		case "windows":
+			for _, p := range spec.winPaths() {
+				if p != "" {
+					if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+						foundPath = p
+						break
+					}
+				}
+			}
+			if foundPath == "" {
+				if p, err := exec.LookPath(spec.id); err == nil {
+					foundPath = p
+				}
+			}
+		case "darwin":
+			for _, p := range spec.macPaths {
+				if fi, err := os.Stat(p); err == nil {
+					_ = fi
+					foundPath = p
+					break
+				}
+			}
+		case "linux":
+			for _, cmd := range spec.linuxCmds {
+				if p, err := exec.LookPath(cmd); err == nil {
+					foundPath = p
+					break
+				}
+			}
+		}
+
+		if foundPath != "" {
+			detected = append(detected, BrowserInfo{
+				ID:          spec.id,
+				Name:        spec.name,
+				Scheme:      spec.scheme,
+				ExecPath:    foundPath,
+				DownloadURL: spec.downloadURL,
+			})
 		}
 	}
 
-	fmt.Printf("\n👉 首次在 Brave 中启用插件只需 1 步：\n")
-	fmt.Printf("   1. 在 Brave 地址栏打开 `brave://extensions`，右上角开启「开发者模式 (Developer mode)」\n")
-	fmt.Printf("   2. 将%s中的 `extension` 文件夹拖入该页面（或点击「加载已解压的扩展程序」选择：%s，路径已复制到剪贴板）\n", fileManager, extDir)
+	return detected
+}
 
-	return nil
+func isTerminal() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
+}
+
+func copyToClipboard(text string) {
+	switch runtime.GOOS {
+	case "darwin":
+		copyCmd := exec.Command("pbcopy")
+		copyCmd.Stdin = strings.NewReader(text)
+		_ = copyCmd.Run()
+	case "windows":
+		copyCmd := exec.Command("clip")
+		copyCmd.Stdin = strings.NewReader(text)
+		_ = copyCmd.Run()
+	default:
+		if p, err := exec.LookPath("wl-copy"); err == nil {
+			cmd := exec.Command(p)
+			cmd.Stdin = strings.NewReader(text)
+			_ = cmd.Run()
+		} else if p, err := exec.LookPath("xclip"); err == nil {
+			cmd := exec.Command(p, "-selection", "clipboard")
+			cmd.Stdin = strings.NewReader(text)
+			_ = cmd.Run()
+		}
+	}
+}
+
+func openURL(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
+}
+
+func launchBrowserAndFolder(b BrowserInfo, extDir string) {
+	switch runtime.GOOS {
+	case "darwin":
+		if b.ExecPath != "" {
+			_ = exec.Command("open", "-a", b.ExecPath, b.Scheme).Start()
+		} else {
+			_ = exec.Command("open", b.Scheme).Start()
+		}
+		_ = exec.Command("open", "-R", extDir).Start()
+	case "windows":
+		if b.ExecPath != "" {
+			_ = exec.Command(b.ExecPath, b.Scheme).Start()
+		} else {
+			_ = exec.Command("cmd.exe", "/c", "start", b.Scheme).Start()
+		}
+		_ = exec.Command("explorer.exe", extDir).Start()
+	case "linux":
+		if b.ExecPath != "" {
+			_ = exec.Command(b.ExecPath, b.Scheme).Start()
+		}
+		if p, err := exec.LookPath("xdg-open"); err == nil {
+			_ = exec.Command(p, extDir).Start()
+		}
+	}
 }
 
 // registerWindowsNativeHost writes HKCU registry keys pointing at the manifest file
@@ -250,6 +512,7 @@ func getNativeMessagingHostDirs(homeDir string) []string {
 		return []string{
 			filepath.Join(appSupport, "BraveSoftware", "Brave-Browser", "NativeMessagingHosts"),
 			filepath.Join(appSupport, "Google", "Chrome", "NativeMessagingHosts"),
+			filepath.Join(appSupport, "Microsoft Edge", "NativeMessagingHosts"),
 			filepath.Join(appSupport, "Chromium", "NativeMessagingHosts"),
 		}
 	case "linux":
@@ -257,6 +520,7 @@ func getNativeMessagingHostDirs(homeDir string) []string {
 		return []string{
 			filepath.Join(cfgDir, "BraveSoftware", "Brave-Browser", "NativeMessagingHosts"),
 			filepath.Join(cfgDir, "google-chrome", "NativeMessagingHosts"),
+			filepath.Join(cfgDir, "microsoft-edge", "NativeMessagingHosts"),
 			filepath.Join(cfgDir, "chromium", "NativeMessagingHosts"),
 		}
 	default:

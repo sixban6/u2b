@@ -161,7 +161,7 @@ main() {
     log "u2b_download: $(command -v u2b_download)"
   fi
 
-  log "Deploying u2b Brave/Chrome browser extension"
+  log "Deploying u2b Brave/Chrome/Edge browser extension"
   "$gobin/u2b" ext install || warn "Browser extension setup skipped"
 }
 
