@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,52 @@ func TestDetectInstalledBrowsers(t *testing.T) {
 		} else if fi.IsDir() && filepath.Ext(b.ExecPath) != ".app" {
 			t.Errorf("detected browser executable is unexpected directory: %s", b.ExecPath)
 		}
+	}
+}
+
+func TestGenerateNavHTML(t *testing.T) {
+	htmlContent := generateNavHTML("Brave Browser", "brave://extensions", "/home/test/u2b/extension", "/home/test/u2b")
+	if len(htmlContent) == 0 {
+		t.Fatal("nav.html content is empty")
+	}
+	expectedStrings := []string{
+		"Brave Browser",
+		"brave://extensions",
+		"/home/test/u2b/extension",
+		"开发者模式",
+		"copyText",
+	}
+	for _, s := range expectedStrings {
+		if !strings.Contains(htmlContent, s) {
+			t.Errorf("expected nav.html to contain %q", s)
+		}
+	}
+}
+
+func TestEnableDeveloperModeInFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	prefFile := filepath.Join(tmpDir, "Preferences")
+	initialJSON := `{"extensions": {"other": 1}}`
+	if err := os.WriteFile(prefFile, []byte(initialJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := enableDeveloperModeInFile(prefFile)
+	if !updated {
+		t.Fatal("expected enableDeveloperModeInFile to return true")
+	}
+
+	data, err := os.ReadFile(prefFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"developer_mode": true`) {
+		t.Fatalf("expected developer_mode: true in file, got: %s", string(data))
+	}
+
+	// Second invocation should return false (already enabled)
+	updatedAgain := enableDeveloperModeInFile(prefFile)
+	if updatedAgain {
+		t.Fatal("expected second enableDeveloperModeInFile to return false")
 	}
 }

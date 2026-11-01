@@ -212,21 +212,35 @@ exec %q native-host "$@"
 	}
 
 	primary := browsers[0]
+
+	// 7. Auto-enable Developer Mode in detected browsers' profiles
+	enabledDevCount := enableDeveloperModeForBrowsers(browsers)
+	if enabledDevCount > 0 {
+		fmt.Printf("⚡ 开发者模式已自动在 %d 处浏览器 Profile 中开启\n", enabledDevCount)
+	}
+
+	// 8. Generate onboarding nav.html
+	navFile := filepath.Join(baseDir, "nav.html")
+	navContent := generateNavHTML(primary.Name, primary.Scheme, extDir, baseDir)
+	_ = os.WriteFile(navFile, []byte(navContent), 0644)
+
+	copyToClipboard(extDir)
+
+	if !extNoOpen {
+		launchBrowserAndFolder(primary, extDir, baseDir, navFile)
+	}
+
 	fileManager := "Finder"
 	if runtime.GOOS == "windows" {
 		fileManager = "资源管理器"
 	}
 
-	copyToClipboard(extDir)
-
-	if !extNoOpen {
-		launchBrowserAndFolder(primary, extDir)
-	}
-
-	fmt.Printf("\n👉 首次在 %s 中启用插件只需 1 步：\n", primary.Name)
-	fmt.Printf("   1. 在 %s 打开 `%s`，右上角开启「开发者模式 (Developer mode)」\n", primary.Name, primary.Scheme)
-	fmt.Printf("   2. 将%s中的 `extension` 文件夹拖入该页面（或点击「加载已解压的扩展程序」选择该路径，已复制到剪贴板）\n", fileManager)
-	fmt.Printf("      文件夹路径: %s\n", extDir)
+	fmt.Printf("\n🌐 已在 %s 中打开引导页面: %s\n", primary.Name, navFile)
+	fmt.Printf("📂 已在%s中打开 u2b 目录并高亮选中 extension 文件夹\n", fileManager)
+	fmt.Printf("\n👉 启用插件只需 2 步：\n")
+	fmt.Printf("   1. 在浏览器新标签页中打开 `%s`（页面提供一键复制）\n", primary.Scheme)
+	fmt.Printf("   2. 将%s中已高亮选中的 `extension` 文件夹直接拖入该页面即可！\n", fileManager)
+	fmt.Printf("      （文件夹路径已复制到剪贴板: %s）\n", extDir)
 
 	return nil
 }
@@ -429,30 +443,129 @@ func openURL(url string) error {
 	}
 }
 
-func launchBrowserAndFolder(b BrowserInfo, extDir string) {
+func launchBrowserAndFolder(b BrowserInfo, extDir, baseDir, navFile string) {
 	switch runtime.GOOS {
 	case "darwin":
 		if b.ExecPath != "" {
-			_ = exec.Command("open", "-a", b.ExecPath, b.Scheme).Start()
+			_ = exec.Command("open", "-a", b.ExecPath, navFile).Start()
 		} else {
-			_ = exec.Command("open", b.Scheme).Start()
+			_ = exec.Command("open", navFile).Start()
 		}
+		// open -R highlights the extension directory inside the parent u2b folder
 		_ = exec.Command("open", "-R", extDir).Start()
 	case "windows":
 		if b.ExecPath != "" {
-			_ = exec.Command(b.ExecPath, b.Scheme).Start()
+			_ = exec.Command(b.ExecPath, navFile).Start()
 		} else {
-			_ = exec.Command("cmd.exe", "/c", "start", b.Scheme).Start()
+			_ = exec.Command("cmd.exe", "/c", "start", "", navFile).Start()
 		}
-		_ = exec.Command("explorer.exe", extDir).Start()
+		// explorer /select,<path> opens parent u2b and highlights the extension folder
+		_ = exec.Command("explorer.exe", fmt.Sprintf("/select,%s", extDir)).Start()
 	case "linux":
 		if b.ExecPath != "" {
-			_ = exec.Command(b.ExecPath, b.Scheme).Start()
+			_ = exec.Command(b.ExecPath, navFile).Start()
+		} else if p, err := exec.LookPath("xdg-open"); err == nil {
+			_ = exec.Command(p, navFile).Start()
 		}
 		if p, err := exec.LookPath("xdg-open"); err == nil {
-			_ = exec.Command(p, extDir).Start()
+			_ = exec.Command(p, baseDir).Start()
 		}
 	}
+}
+
+// enableDeveloperModeForBrowsers scans profile directories of detected browsers and ensures
+// extensions.ui.developer_mode is true in Preferences, returning the count of profiles updated.
+func enableDeveloperModeForBrowsers(browsers []BrowserInfo) int {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return 0
+	}
+
+	var dataDirs []string
+	for _, b := range browsers {
+		switch runtime.GOOS {
+		case "windows":
+			local := os.Getenv("LOCALAPPDATA")
+			switch b.ID {
+			case "brave":
+				dataDirs = append(dataDirs, filepath.Join(local, "BraveSoftware", "Brave-Browser", "User Data"))
+			case "chrome":
+				dataDirs = append(dataDirs, filepath.Join(local, "Google", "Chrome", "User Data"))
+			case "edge":
+				dataDirs = append(dataDirs, filepath.Join(local, "Microsoft", "Edge", "User Data"))
+			case "chromium":
+				dataDirs = append(dataDirs, filepath.Join(local, "Chromium", "User Data"))
+			}
+		case "darwin":
+			appSupport := filepath.Join(homeDir, "Library", "Application Support")
+			switch b.ID {
+			case "brave":
+				dataDirs = append(dataDirs, filepath.Join(appSupport, "BraveSoftware", "Brave-Browser"))
+			case "chrome":
+				dataDirs = append(dataDirs, filepath.Join(appSupport, "Google", "Chrome"))
+			case "edge":
+				dataDirs = append(dataDirs, filepath.Join(appSupport, "Microsoft Edge"))
+			case "chromium":
+				dataDirs = append(dataDirs, filepath.Join(appSupport, "Chromium"))
+			}
+		case "linux":
+			cfgDir := filepath.Join(homeDir, ".config")
+			switch b.ID {
+			case "brave":
+				dataDirs = append(dataDirs, filepath.Join(cfgDir, "BraveSoftware", "Brave-Browser"))
+			case "chrome":
+				dataDirs = append(dataDirs, filepath.Join(cfgDir, "google-chrome"))
+			case "edge":
+				dataDirs = append(dataDirs, filepath.Join(cfgDir, "microsoft-edge"))
+			case "chromium":
+				dataDirs = append(dataDirs, filepath.Join(cfgDir, "chromium"))
+			}
+		}
+	}
+
+	count := 0
+	for _, d := range dataDirs {
+		matches, _ := filepath.Glob(filepath.Join(d, "*", "Preferences"))
+		for _, pref := range matches {
+			if enableDeveloperModeInFile(pref) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func enableDeveloperModeInFile(prefPath string) bool {
+	data, err := os.ReadFile(prefPath)
+	if err != nil {
+		return false
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return false
+	}
+
+	extObj, ok := root["extensions"].(map[string]any)
+	if !ok {
+		extObj = make(map[string]any)
+		root["extensions"] = extObj
+	}
+	uiObj, ok := extObj["ui"].(map[string]any)
+	if !ok {
+		uiObj = make(map[string]any)
+		extObj["ui"] = uiObj
+	}
+
+	if devMode, ok := uiObj["developer_mode"].(bool); ok && devMode {
+		return false
+	}
+	uiObj["developer_mode"] = true
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false
+	}
+	return os.WriteFile(prefPath, out, 0644) == nil
 }
 
 // registerWindowsNativeHost writes HKCU registry keys pointing at the manifest file
