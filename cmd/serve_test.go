@@ -213,3 +213,41 @@ func TestServerEndpointsAuthAndFileStreaming(t *testing.T) {
 		t.Fatalf("expected 206 Partial Content '0123', got status=%d body=%q", rangeResp.StatusCode, string(gotRange))
 	}
 }
+
+func TestVirtualInterfaceFilteringAndSetupUI(t *testing.T) {
+	virtualIfaces := []string{"bridge0", "bridge100", "vmenet0", "vmnet8", "docker0", "br-abc123", "veth9f12", "utun4", "vEthernet (WSL)"}
+	for _, name := range virtualIfaces {
+		if !isVirtualOrBridgeInterface(name) {
+			t.Errorf("expected virtual interface %q to be filtered out", name)
+		}
+	}
+
+	realIfaces := []string{"en0", "en1", "eth0", "wlan0", "Wi-Fi", "Ethernet"}
+	for _, name := range realIfaces {
+		if isVirtualOrBridgeInterface(name) {
+			t.Errorf("expected physical LAN interface %q NOT to be filtered out", name)
+		}
+	}
+
+	srv := NewU2BServer("127.0.0.1:18990", 18990, "")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/setup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	html := string(body)
+
+	for _, want := range []string{"方式一：手机扫码", "方式二：安装快捷指令"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("expected /setup HTML to contain %q", want)
+		}
+	}
+	if strings.Contains(html, "方案 B：主屏幕 Web App") {
+		t.Error("expected /setup HTML NOT to contain deleted '方案 B：主屏幕 Web App'")
+	}
+}
+

@@ -497,7 +497,7 @@
     <div id="view-setup" class="hidden">
       <div class="card">
         <div class="card-title">
-          <span>1. 选择连接地址 &amp; 手机扫码</span>
+          <span>方式一：手机扫码</span>
           <span class="badge">Wi-Fi / Tailscale</span>
         </div>
         <div id="addr-pills" class="pills"></div>
@@ -506,13 +506,13 @@
           <div id="selected-addr-text" class="addr-code"></div>
         </div>
         <div style="font-size:12px;color:var(--muted);text-align:center;">
-          用 iPhone 相机扫描二维码，直接在手机 Brave 中打开本面板
+          用 iPhone 相机扫描二维码，直接在手机 Brave 中进入下载中心
         </div>
       </div>
 
       <div class="card">
         <div class="card-title">
-          <span>2. 方案 A：iOS 分享菜单快捷指令</span>
+          <span>方式二：安装快捷指令</span>
           <span class="badge ok">最推荐 · 一键投递</span>
         </div>
         <p style="font-size:13px;color:#cbd5e1;margin:0 0 12px;line-height:1.55;">
@@ -542,21 +542,7 @@
 
       <div class="card">
         <div class="card-title">
-          <span>3. 方案 B：主屏幕 Web App &amp; 小书签</span>
-          <span class="badge">可视化进度管理</span>
-        </div>
-        <ol class="step-list" style="margin-top:0;">
-          <li><strong>添加到主屏幕 (PWA)</strong>：在 iPhone Brave 打开本页 → 点击底部「分享」图标 → 选择<strong>「添加到主屏幕」</strong>，即可像原生 App 一样随时查看进度、管理分类目录、取回已下载的 MP4/MP3。</li>
-          <li><strong>Brave 书签脚本（免装快捷指令备选）</strong>：复制下方代码保存为 Brave 书签，看 YouTube 时点一下书签即可带链接跳入本面板：</li>
-        </ol>
-        <div style="margin-top:10px;">
-          <button id="copy-bookmarklet-btn" class="btn btn-outline btn-full" type="button">📋 一键复制 Brave 书签脚本</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">
-          <span>4. 会员专属视频 Cookie 状态</span>
+          <span>会员专属视频 Cookie 状态</span>
           <span id="setup-cookie-status" class="badge">检测中</span>
         </div>
         <p style="font-size:12px;color:var(--muted);margin:0;line-height:1.55;">
@@ -636,9 +622,10 @@
         el("view-setup").classList.toggle("hidden", !isSetup);
       }
 
+      const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       el("tab-dl").onclick = () => switchTab("dl");
       el("tab-setup").onclick = () => switchTab("setup");
-      if (location.pathname.startsWith("/setup")) {
+      if (params.get("tab") === "setup" || (location.pathname.startsWith("/setup") && !isMobileDevice)) {
         switchTab("setup");
       }
 
@@ -869,9 +856,9 @@
         });
 
         const tok = getToken();
-        const setupTarget = state.selectedHost + "/setup" + (tok ? "?token=" + encodeURIComponent(tok) : "");
+        const qrTarget = state.selectedHost + "/" + (tok ? "?token=" + encodeURIComponent(tok) : "");
         el("selected-addr-text").textContent = state.selectedHost;
-        el("qr-img").src = apiUrl("/api/qr.svg?text=" + encodeURIComponent(setupTarget));
+        el("qr-img").src = apiUrl("/api/qr.svg?text=" + encodeURIComponent(qrTarget));
 
         const shortcutHref = apiUrl("/api/shortcut/u2b.shortcut?host=" + encodeURIComponent(state.selectedHost));
         el("download-shortcut-btn").href = shortcutHref;
@@ -901,18 +888,6 @@
           }
         } catch (err) {
           showToast("操作失败: " + err.message);
-        }
-      };
-
-      el("copy-bookmarklet-btn").onclick = async () => {
-        const tok = getToken();
-        const tokPart = tok ? `token=${encodeURIComponent(tok)}&` : "";
-        const bm = `javascript:void(location.href='${state.selectedHost}/?${tokPart}url='+encodeURIComponent(location.href))`;
-        try {
-          await navigator.clipboard.writeText(bm);
-          showToast("✅ 已复制书签脚本！新建 Brave 书签并粘贴为网址即可");
-        } catch (_) {
-          prompt("请全选复制以下书签脚本：", bm);
         }
       };
 

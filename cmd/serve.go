@@ -192,8 +192,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		primaryURL = addrs[0].URL
 	}
 	setupURL := primaryURL + "/setup"
+	qrTargetURL := primaryURL + "/"
 	if token != "" {
-		setupURL += "?token=" + url.QueryEscape(token)
+		q := "?token=" + url.QueryEscape(token)
+		setupURL += q
+		qrTargetURL += q
 	}
 
 	fmt.Printf("\n🚀 u2b 跨端下载服务已启动 (监听 %s)\n", listenAddr)
@@ -205,8 +208,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("   • iPhone 接入引导页:       %s\n", setupURL)
 
-	if qrTerm, err := RenderQRTerminal(setupURL); err == nil {
-		fmt.Printf("\n📱 使用 iPhone 相机扫描二维码，一键配置 Brave 快捷指令与手机面板：\n\n%s\n", qrTerm)
+	if qrTerm, err := RenderQRTerminal(qrTargetURL); err == nil {
+		fmt.Printf("\n📱 使用 iPhone 相机扫描二维码，直接进入下载中心：\n\n%s\n", qrTerm)
 	}
 
 	if serveOpen {
@@ -295,7 +298,7 @@ func DiscoverServerAddresses(port int) []ServerAddress {
 			}
 			if cgnatNet != nil && cgnatNet.Contains(ip4) {
 				tailscaleIPs = append(tailscaleIPs, ip4.String())
-			} else if ip4.IsPrivate() {
+			} else if ip4.IsPrivate() && !isVirtualOrBridgeInterface(iface.Name) {
 				lanIPs = append(lanIPs, ip4.String())
 			}
 		}
@@ -311,6 +314,32 @@ func DiscoverServerAddresses(port int) []ServerAddress {
 		add("本机回环", "127.0.0.1")
 	}
 	return list
+}
+
+// isVirtualOrBridgeInterface filters out host-only VM bridges and container interfaces
+// (e.g. macOS Virtualization.framework/Colima bridge100, VMware vmnet, Docker, WSL)
+// that are unreachable from external phones on the Wi-Fi LAN.
+func isVirtualOrBridgeInterface(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	prefixes := []string{
+		"bridge", "vmenet", "vmnet", "vboxnet",
+		"docker", "br-", "virbr", "veth", "cni", "flannel", "cali", "podman", "lxc",
+		"utun", "tun", "tap",
+		"awdl", "llw", "anpi",
+		"vethernet",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	substrings := []string{"vmware", "virtualbox", "wsl", "hyper-v", "docker", "colima", "orbstack", "parallels"}
+	for _, sub := range substrings {
+		if strings.Contains(lower, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // Handler returns the root http.Handler for `u2b serve`.
@@ -831,7 +860,7 @@ func (s *U2BServer) handleAPIQRCode(w http.ResponseWriter, r *http.Request) {
 	text := strings.TrimSpace(r.URL.Query().Get("text"))
 	if text == "" {
 		addrs := DiscoverServerAddresses(s.port)
-		text = addrs[0].URL + "/setup"
+		text = addrs[0].URL + "/"
 		if s.token != "" {
 			text += "?token=" + url.QueryEscape(s.token)
 		}

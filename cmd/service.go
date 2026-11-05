@@ -189,17 +189,17 @@ WantedBy=default.target
 	if len(addrs) > 0 {
 		primary = addrs[0].URL
 	}
-	setupURL := primary + "/setup"
+	qrTargetURL := primary + "/"
 	if token != "" {
-		setupURL += "?token=" + url.QueryEscape(token)
+		qrTargetURL += "?token=" + url.QueryEscape(token)
 	}
 
 	fmt.Printf("\n🌐 iPhone Brave 接入地址：\n")
 	for _, a := range addrs {
 		fmt.Printf("   • %-24s %s\n", a.Label+":", a.URL)
 	}
-	if qr, err := RenderQRTerminal(setupURL); err == nil {
-		fmt.Printf("\n📱 用 iPhone 相机扫码一键接入：\n\n%s\n", qr)
+	if qr, err := RenderQRTerminal(qrTargetURL); err == nil {
+		fmt.Printf("\n📱 用 iPhone 相机扫码一键进入下载中心：\n\n%s\n", qr)
 	}
 
 	if !serviceNoOpen {
