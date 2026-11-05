@@ -39,7 +39,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: 'stable'
           check-latest: true
 
       - name: Run unit tests
@@ -117,7 +117,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: 'stable'
           check-latest: true
 
       - name: Validate installer & run macOS tests
@@ -178,7 +178,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: 'stable'
           check-latest: true
 
       - name: Validate installer & run Windows tests
@@ -244,7 +244,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: 'stable'
           check-latest: true
 
       - name: Build & Package Linux Binaries
