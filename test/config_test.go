@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~sixban/u2b_download/config"
+	"github.com/sixban6/u2b/config"
 )
 
 func TestLoadConfig(t *testing.T) {

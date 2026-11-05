@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"git.sr.ht/~sixban/u2b_download/config"
-	"git.sr.ht/~sixban/u2b_download/downloader"
+	"github.com/sixban6/u2b/config"
+	"github.com/sixban6/u2b/downloader"
 	"github.com/spf13/cobra"
 )
 
@@ -41,18 +41,17 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "u2b [URL]",
 	Short: "A powerful YouTube downloader with membership channel support",
-	Long: `u2b (u2b_download) is a command-line tool for downloading YouTube videos, 
-including content from membership channels. It uses yt-dlp under the hood
-and supports various authentication methods including browser cookies.
+	Long: `u2b is a modern command-line and cross-device YouTube downloader,
+including content from membership channels. It uses yt-dlp under the hood,
+supports desktop browser extensions and iPhone/mobile remote downloading (u2b serve).
 
 Examples:
   u2b "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b -m -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
-  u2b -q hd1080 "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b serve
   u2b pl "https://www.youtube.com/playlist?list=PLAYLIST_ID"
-  u2b info "https://www.youtube.com/watch?v=VIDEO_ID"
-  u2b config init`,
+  u2b info "https://www.youtube.com/watch?v=VIDEO_ID"`,
 	Version:      Version,
 	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
@@ -469,9 +468,17 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 
 	// Build arguments
 	args := []string{
-		"--cookies-from-browser", "brave",
 		"--output", filepath.Join(outputDir, "%(playlist_index)02d - %(title)s [%(id)s].%(ext)s"),
 		"--extractor-args", "youtube:client=web_creator",
+	}
+	if cfg.Auth.Method == config.AuthMethodCookiesFile && cfg.Auth.CookiesFile != "" {
+		args = append(args, "--cookies", cfg.Auth.CookiesFile)
+	} else if cfg.Auth.Method == config.AuthMethodBrowser && cfg.Auth.Browser != "" {
+		args = append(args, "--cookies-from-browser", cfg.Auth.Browser)
+	} else if cached := resolveCachedCookiesFile(); cached != "" {
+		args = append(args, "--cookies", cached)
+	} else if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		args = append(args, "--cookies-from-browser", "brave")
 	}
 
 	if ffmpegLoc := downloader.FindFFmpegLocation(); ffmpegLoc != "" {

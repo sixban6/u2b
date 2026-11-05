@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~sixban/u2b_download/config"
-	"git.sr.ht/~sixban/u2b_download/downloader"
+	"github.com/sixban6/u2b/config"
+	"github.com/sixban6/u2b/downloader"
 )
 
 // Integration tests - these tests require actual external dependencies

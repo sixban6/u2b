@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"git.sr.ht/~sixban/u2b_download/config"
-	"git.sr.ht/~sixban/u2b_download/downloader"
+	"github.com/sixban6/u2b/config"
+	"github.com/sixban6/u2b/downloader"
 )
 
 func TestBuildDownloadArgsMP3(t *testing.T) {

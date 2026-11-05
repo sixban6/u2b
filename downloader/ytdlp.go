@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"git.sr.ht/~sixban/u2b_download/config"
+	"github.com/sixban6/u2b/config"
 )
 
 // OutdatedThresholdDays is the fallback age threshold when online version check is unavailable.
@@ -184,7 +184,7 @@ func (y *YtdlpExecutor) fetchLatestVersion(ctx context.Context) (string, error) 
 	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest", nil)
 	if err == nil {
 		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("User-Agent", "u2b_download/1.0")
+		req.Header.Set("User-Agent", "u2b/1.0")
 		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
 			defer resp.Body.Close()

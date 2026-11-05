@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"git.sr.ht/~sixban/u2b_download/downloader"
+	"github.com/sixban6/u2b/downloader"
 )
 
 func TestNeedsBrowserAuthRetry(t *testing.T) {

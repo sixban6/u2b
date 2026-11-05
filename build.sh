@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-OUTPUT_PATH="$ROOT_DIR/u2b_download"
+OUTPUT_PATH="$ROOT_DIR/u2b"
 RUN_TESTS=1
 BUILD_ALL=0
 
@@ -14,7 +14,7 @@ usage() {
 Usage: ./build.sh [options]
 
 Options:
-  -o, --output <path>   Output binary path (default: ./u2b_download)
+  -o, --output <path>   Output binary path (default: ./u2b)
       --all             Build and package for all platforms into dist/
       --no-test         Skip running go test
   -h, --help            Show help
@@ -68,7 +68,7 @@ VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo "v1.0.0")
 COMMIT="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "none")}"
 DATE="${DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
 
-LDFLAGS="-s -w -X git.sr.ht/~sixban/u2b_download/cmd.Version=${VERSION} -X git.sr.ht/~sixban/u2b_download/cmd.GitCommit=${COMMIT} -X git.sr.ht/~sixban/u2b_download/cmd.BuildDate=${DATE}"
+LDFLAGS="-s -w -X github.com/sixban6/u2b/cmd.Version=${VERSION} -X github.com/sixban6/u2b/cmd.GitCommit=${COMMIT} -X github.com/sixban6/u2b/cmd.BuildDate=${DATE}"
 
 if [[ "$BUILD_ALL" -eq 1 ]]; then
   echo "==> Building all release packages into ./dist"

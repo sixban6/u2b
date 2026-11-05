@@ -31,3 +31,7 @@ youtube:
   client: "web_creator"
   skip_premium_only: true
   extract_chapters: true
+
+server:
+  listen: "0.0.0.0:8989"
+  token: ""

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"git.sr.ht/~sixban/u2b_download/config"
+	"github.com/sixban6/u2b/config"
 )
 
 // BrowserAuthProvider handles authentication via browser cookies

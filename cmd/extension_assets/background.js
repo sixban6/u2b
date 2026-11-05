@@ -605,7 +605,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return;
 
   if (msg.type === "get_state") {
-    sendNative({ type: "get_config" });
+    getYouTubeCookiesNetscape().then((cookies) => {
+      sendNative({ type: "get_config", cookies: cookies || "" });
+    });
     sendResponse({
       config: appConfig,
       tasks: Array.from(activeTasks.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
@@ -736,5 +738,7 @@ chrome.storage.local.get(["u2bConfig"], (res) => {
     appConfig = { ...appConfig, ...res.u2bConfig };
   }
   rebuildContextMenus();
-  sendNative({ type: "get_config" });
+  getYouTubeCookiesNetscape().then((cookies) => {
+    sendNative({ type: "get_config", cookies: cookies || "" });
+  });
 });

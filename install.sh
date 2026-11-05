@@ -3,8 +3,9 @@
 set -euo pipefail
 
 REPO_OWNER="sixban6"
-REPO_NAME="u2b_download"
+REPO_NAME="u2b"
 GITHUB_REPO="${REPO_OWNER}/${REPO_NAME}"
+LEGACY_GITHUB_REPO="${REPO_OWNER}/u2b_download"
 
 log() {
   printf "==> %s\n" "$*"
@@ -146,15 +147,6 @@ download_prebuilt_binary() {
   local version="${4:-latest}"
 
   local tar_name="u2b-${os_name}-${arch}.tar.gz"
-  local download_url=""
-
-  if [[ "$version" == "latest" ]]; then
-    download_url="https://github.com/${GITHUB_REPO}/releases/latest/download/${tar_name}"
-  else
-    download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${tar_name}"
-  fi
-
-  log "Downloading prebuilt release from: ${download_url}"
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   local tmp_archive="${tmp_dir}/${tar_name}"
@@ -164,7 +156,22 @@ download_prebuilt_binary() {
     curl_opts+=(-H "Authorization: token ${GITHUB_TOKEN}")
   fi
 
-  if ! curl "${curl_opts[@]}" "$download_url" -o "$tmp_archive" 2>/dev/null; then
+  local downloaded=0
+  for repo in "${GITHUB_REPO}" "${LEGACY_GITHUB_REPO}"; do
+    local download_url=""
+    if [[ "$version" == "latest" ]]; then
+      download_url="https://github.com/${repo}/releases/latest/download/${tar_name}"
+    else
+      download_url="https://github.com/${repo}/releases/download/${version}/${tar_name}"
+    fi
+    log "Downloading prebuilt release from: ${download_url}"
+    if curl "${curl_opts[@]}" "$download_url" -o "$tmp_archive" 2>/dev/null; then
+      downloaded=1
+      break
+    fi
+  done
+
+  if [[ "$downloaded" -eq 0 ]]; then
     rm -rf "$tmp_dir"
     return 1
   fi
@@ -192,14 +199,15 @@ build_from_source() {
   local build_dir=""
   local should_cleanup=0
 
-  if [[ -f "go.mod" ]] && grep -q "u2b_download" "go.mod"; then
+  if [[ -f "go.mod" ]] && grep -qE "u2b" "go.mod"; then
     log "Using current repository source"
     go build -trimpath -ldflags "-s -w" -o "$target_dest" .
   else
     build_dir="$(mktemp -d)"
     should_cleanup=1
     log "Cloning repository for compilation..."
-    git clone --depth 1 "https://github.com/${GITHUB_REPO}.git" "$build_dir"
+    git clone --depth 1 "https://github.com/${GITHUB_REPO}.git" "$build_dir" || \
+      git clone --depth 1 "https://github.com/${LEGACY_GITHUB_REPO}.git" "$build_dir"
     (cd "$build_dir" && go build -trimpath -ldflags "-s -w" -o "$target_dest" .)
     rm -rf "$build_dir"
   fi
@@ -264,7 +272,6 @@ EOF
   local install_dir
   install_dir="$(choose_install_dir)"
   local target_bin="${install_dir}/u2b"
-  local symlink_bin="${install_dir}/u2b_download"
 
   # 3. Install binary (Prebuilt or Source)
   local installed=0
@@ -282,8 +289,6 @@ EOF
     build_from_source "$target_bin"
   fi
 
-  # Symlink u2b_download -> u2b
-  ln -sf "$target_bin" "$symlink_bin"
   ensure_path "$install_dir"
 
   log "Installation successful!"

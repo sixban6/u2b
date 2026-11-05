@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o u2b_download .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o u2b .
 
 # Final stage
 FROM python:3.11-alpine
@@ -27,7 +27,7 @@ RUN apk add --no-cache ca-certificates tzdata ffmpeg && \
     pip install --no-cache-dir yt-dlp
 
 # Copy the binary from builder stage
-COPY --from=builder /app/u2b_download /usr/local/bin/u2b_download
+COPY --from=builder /app/u2b /usr/local/bin/u2b
 
 # Create non-root user
 RUN addgroup -g 1001 appuser && \
@@ -43,16 +43,17 @@ USER appuser
 # Set working directory
 WORKDIR /app
 
-# Expose volume for downloads
+# Expose volume for downloads and HTTP port for u2b serve
 VOLUME ["/app/downloads"]
+EXPOSE 8989
 
 # Set environment variables
 ENV PATH="/usr/local/bin:${PATH}"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD u2b_download --version || exit 1
+  CMD u2b version || exit 1
 
 # Default command
-ENTRYPOINT ["u2b_download"]
-CMD ["--help"]
+ENTRYPOINT ["u2b"]
+CMD ["serve"]

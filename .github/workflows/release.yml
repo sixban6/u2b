@@ -53,7 +53,7 @@ jobs:
           DATE: ${{ steps.meta.outputs.date }}
         run: |
           mkdir -p dist
-          LDFLAGS="-s -w -X git.sr.ht/~sixban/u2b_download/cmd.Version=${TAG} -X git.sr.ht/~sixban/u2b_download/cmd.GitCommit=${COMMIT} -X git.sr.ht/~sixban/u2b_download/cmd.BuildDate=${DATE}"
+          LDFLAGS="-s -w -X github.com/sixban6/u2b/cmd.Version=${TAG} -X github.com/sixban6/u2b/cmd.GitCommit=${COMMIT} -X github.com/sixban6/u2b/cmd.BuildDate=${DATE}"
 
           # Format: OS/ARCH/BINARY_NAME/PACKAGE_TYPE
           TARGETS=(

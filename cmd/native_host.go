@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"git.sr.ht/~sixban/u2b_download/config"
-	"git.sr.ht/~sixban/u2b_download/downloader"
+	"github.com/sixban6/u2b/config"
+	"github.com/sixban6/u2b/downloader"
 	"github.com/spf13/cobra"
 )
 
@@ -229,7 +229,15 @@ func runNativeHost(cmd *cobra.Command, args []string) error {
 
 		switch msg.Type {
 		case "ping", "get_config":
+			if strings.TrimSpace(msg.Cookies) != "" {
+				saveCachedCookies(msg.Cookies)
+			}
 			sendConfig(sendMsg)
+
+		case "sync_cookies":
+			if strings.TrimSpace(msg.Cookies) != "" {
+				saveCachedCookies(msg.Cookies)
+			}
 
 		case "save_presets":
 			if msg.Config != nil {
@@ -407,8 +415,9 @@ func handleNativeDownload(ctx context.Context, msg nativeIncomingMessage, sendMs
 	sendConfig(sendMsg)
 
 	// If browser extension passed cookies in-memory, write to temporary Netscape cookies file
-	// This cleanly bypasses Windows SQLite database file locking!
+	// and persist to cookies_cache.txt so mobile `u2b serve` also shares membership auth!
 	if strings.TrimSpace(msg.Cookies) != "" {
+		saveCachedCookies(msg.Cookies)
 		tmpCookie, err := os.CreateTemp("", "u2b_ext_cookies_*.txt")
 		if err == nil {
 			defer os.Remove(tmpCookie.Name())
@@ -560,6 +569,29 @@ func sendConfig(sendMsg func(any)) {
 func presetsFilePath() string {
 	homeDir, _ := os.UserHomeDir()
 	return filepath.Join(homeDir, "u2b", "presets.json")
+}
+
+func cookieCacheFilePath() string {
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, "u2b", "cookies_cache.txt")
+}
+
+func saveCachedCookies(raw string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || !strings.Contains(trimmed, "youtube.com") {
+		return
+	}
+	target := cookieCacheFilePath()
+	_ = os.MkdirAll(filepath.Dir(target), 0755)
+	_ = os.WriteFile(target, []byte(trimmed+"\n"), 0600)
+}
+
+func resolveCachedCookiesFile() string {
+	p := cookieCacheFilePath()
+	if info, err := os.Stat(p); err == nil && !info.IsDir() && info.Size() > 32 {
+		return p
+	}
+	return ""
 }
 
 func loadRawExtensionPresets() *ExtensionPresetsConfig {

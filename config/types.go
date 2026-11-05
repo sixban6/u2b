@@ -10,6 +10,13 @@ type Config struct {
 	Proxy    ProxyConfig    `yaml:"proxy" mapstructure:"proxy"`
 	Advanced AdvancedConfig `yaml:"advanced" mapstructure:"advanced"`
 	YouTube  YouTubeConfig  `yaml:"youtube" mapstructure:"youtube"`
+	Server   ServerConfig   `yaml:"server" mapstructure:"server"`
+}
+
+// ServerConfig defines HTTP/Mobile server settings
+type ServerConfig struct {
+	Listen string `yaml:"listen" mapstructure:"listen"` // e.g. "0.0.0.0:8989"
+	Token  string `yaml:"token" mapstructure:"token"`   // optional API token
 }
 
 // AuthConfig defines authentication settings

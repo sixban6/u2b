@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"git.sr.ht/~sixban/u2b_download/config"
+	"github.com/sixban6/u2b/config"
 )
 
 // Downloader defines the interface for video downloaders

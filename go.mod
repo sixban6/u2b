@@ -1,4 +1,4 @@
-module git.sr.ht/~sixban/u2b_download
+module github.com/sixban6/u2b
 
 go 1.21
 

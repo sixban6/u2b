@@ -3,8 +3,8 @@ package test
 import (
 	"testing"
 
-	u2bcmd "git.sr.ht/~sixban/u2b_download/cmd"
-	"git.sr.ht/~sixban/u2b_download/downloader"
+	u2bcmd "github.com/sixban6/u2b/cmd"
+	"github.com/sixban6/u2b/downloader"
 )
 
 func TestSanitizeURL(t *testing.T) {

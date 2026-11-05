@@ -1,7 +1,7 @@
 package main
 
 import (
-	"git.sr.ht/~sixban/u2b_download/cmd"
+	"github.com/sixban6/u2b/cmd"
 )
 
 func main() {

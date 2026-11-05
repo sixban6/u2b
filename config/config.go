@@ -33,8 +33,9 @@ func LoadConfig(configPath string) (*Config, error) {
 		v.SetConfigType("yaml")
 		v.AddConfigPath(".")
 		v.AddConfigPath("$HOME/u2b")
+		v.AddConfigPath("$HOME/.u2b")
+		v.AddConfigPath("/etc/u2b")
 		v.AddConfigPath("$HOME/.u2b_download")
-		v.AddConfigPath("/etc/u2b_download")
 	}
 
 	v.SetEnvPrefix("U2B")
@@ -100,6 +101,10 @@ func DefaultConfig() *Config {
 			SkipPremiumOnly: true,
 			ExtractChapters: true,
 		},
+		Server: ServerConfig{
+			Listen: "0.0.0.0:8989",
+			Token:  "",
+		},
 	}
 }
 
@@ -132,6 +137,9 @@ func applyDefaults(v *viper.Viper) {
 	v.SetDefault("youtube.client", def.YouTube.Client)
 	v.SetDefault("youtube.skip_premium_only", def.YouTube.SkipPremiumOnly)
 	v.SetDefault("youtube.extract_chapters", def.YouTube.ExtractChapters)
+
+	v.SetDefault("server.listen", def.Server.Listen)
+	v.SetDefault("server.token", def.Server.Token)
 }
 
 // validateConfig validates the loaded configuration.
@@ -235,13 +243,15 @@ func GetConfigPath() string {
 
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		configPath := filepath.Join(homeDir, ".u2b_download", "config.yaml")
-		if _, err := os.Stat(configPath); err == nil {
-			return configPath
+		for _, sub := range []string{".u2b", "u2b", ".u2b_download"} {
+			configPath := filepath.Join(homeDir, sub, "config.yaml")
+			if _, err := os.Stat(configPath); err == nil {
+				return configPath
+			}
 		}
 	}
 
-	systemConfigPath := "/etc/u2b_download/config.yaml"
+	systemConfigPath := "/etc/u2b/config.yaml"
 	if _, err := os.Stat(systemConfigPath); err == nil {
 		return systemConfigPath
 	}
@@ -300,6 +310,10 @@ youtube:
   client: web_creator
   skip_premium_only: true
   extract_chapters: true
+
+server:
+  listen: "0.0.0.0:8989"
+  token: ""
 `
 
 	if err := os.WriteFile(configPath, []byte(defaultContent), 0644); err != nil {
