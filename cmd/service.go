@@ -76,14 +76,11 @@ func runServiceInstall(cmd *cobra.Command, args []string) error {
 		cfg = config.DefaultConfig()
 	}
 	listenAddr, port, _ := resolveListenAddress(cfg)
-	token := strings.TrimSpace(serveToken)
-	if token == "" {
-		token = strings.TrimSpace(cfg.Server.Token)
-	}
+	explicitToken := strings.TrimSpace(serveToken)
+	token := resolveOrCreateServerToken(explicitToken, cfg.Server.Token, serveGenToken, serveNoAuth)
 
 	u2bBin := resolveInstalledU2BBinary(homeDir)
-	baseDir := filepath.Join(homeDir, "u2b")
-	_ = os.MkdirAll(baseDir, 0755)
+	baseDir := ensureSecureU2BDir()
 	logPath := filepath.Join(baseDir, "serve.log")
 
 	switch runtime.GOOS {
@@ -93,9 +90,15 @@ func runServiceInstall(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
+		// Only pass --token on process CLI if user overrode --token explicitly;
+		// otherwise `u2b serve` automatically reads ~/u2b/server_token (mode 0600),
+		// avoiding exposing the token in `ps aux` process listings.
 		cmdArgs := []string{u2bBin, "serve", "--listen", listenAddr}
-		if token != "" {
-			cmdArgs = append(cmdArgs, "--token", token)
+		if explicitToken != "" {
+			cmdArgs = append(cmdArgs, "--token", explicitToken)
+		}
+		if serveNoAuth {
+			cmdArgs = append(cmdArgs, "--no-auth")
 		}
 
 		var argsXML strings.Builder
@@ -153,8 +156,11 @@ func runServiceInstall(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		execLine := fmt.Sprintf("%s serve --listen %s", u2bBin, listenAddr)
-		if token != "" {
-			execLine += " --token " + token
+		if explicitToken != "" {
+			execLine += " --token " + explicitToken
+		}
+		if serveNoAuth {
+			execLine += " --no-auth"
 		}
 		unitContent := fmt.Sprintf(`[Unit]
 Description=u2b Cross-Device YouTube Downloader Server
@@ -267,8 +273,12 @@ func runServiceStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	token := resolveOrCreateServerToken(serveToken, cfg.Server.Token, false, serveNoAuth)
 	for _, a := range DiscoverServerAddresses(port) {
 		fmt.Printf("   • %-24s %s\n", a.Label+":", a.URL)
+	}
+	if token != "" {
+		fmt.Printf("   • 本机安全引导页:         http://localhost:%d/setup?token=%s\n", port, url.QueryEscape(token))
 	}
 	return nil
 }

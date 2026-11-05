@@ -58,6 +58,7 @@ type AdvancedConfig struct {
 	Timeout    time.Duration `yaml:"timeout" mapstructure:"timeout"`
 	Verbose    bool          `yaml:"verbose" mapstructure:"verbose"`
 	YtdlpPath  string        `yaml:"ytdlp_path" mapstructure:"ytdlp_path"`
+	NoSandbox  bool          `yaml:"no_sandbox" mapstructure:"no_sandbox"`
 	ExtraArgs  []string      `yaml:"extra_args" mapstructure:"extra_args"`
 }
 

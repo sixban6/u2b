@@ -119,19 +119,16 @@ func NewYouTubeDownloader(cfg *config.Config) (*YouTubeDownloader, error) {
 
 // SanitizeURL removes shell-escaped backslashes (e.g. \? \= \& from zsh url-quote-magic) in HTTP(S) URLs.
 func SanitizeURL(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
-		return strings.ReplaceAll(trimmed, `\`, "")
-	}
-	return trimmed
+	return config.ExtractMediaURL(raw)
 }
 
 // Download implements the Downloader interface
 func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *config.DownloadOptions) (*DownloadResult, error) {
-	url = SanitizeURL(url)
-	if url == "" {
-		return nil, fmt.Errorf("URL cannot be empty")
+	cleanURL, err := config.ValidateAllowedMediaURL(url)
+	if err != nil {
+		return nil, err
 	}
+	url = cleanURL
 	if options == nil {
 		return nil, fmt.Errorf("download options cannot be nil")
 	}
@@ -153,15 +150,26 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url string, options *c
 
 	selectedQuality := ""
 	if !isAudioOnlyMP3 {
-		// Select quality only for video downloads.
+		// Select quality for video downloads; if target site omits format heights (e.g. TikTok/Douyin/X),
+		// fall back gracefully to the requested quality cap so yt-dlp's '/best' selector handles it.
 		availableQualities := videoInfo.AvailableQualities
-		selectedQuality, err = d.qualitySelector.SelectBestQuality(
-			availableQualities,
-			options.Quality,
-			d.config.Quality.Fallback,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to select quality: %w", err)
+		if len(availableQualities) == 0 {
+			selectedQuality = config.NormalizeQuality(options.Quality)
+			if selectedQuality == "" {
+				selectedQuality = config.NormalizeQuality(d.config.Quality.Preferred)
+			}
+			if selectedQuality == "" {
+				selectedQuality = config.Quality1080p
+			}
+		} else {
+			selectedQuality, err = d.qualitySelector.SelectBestQuality(
+				availableQualities,
+				options.Quality,
+				d.config.Quality.Fallback,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to select quality: %w", err)
+			}
 		}
 	}
 
@@ -220,10 +228,11 @@ func (d *YouTubeDownloader) ValidateAuth(ctx context.Context) error {
 
 // GetVideoInfo implements the Downloader interface
 func (d *YouTubeDownloader) GetVideoInfo(ctx context.Context, url string) (*config.VideoInfo, error) {
-	url = SanitizeURL(url)
-	if url == "" {
-		return nil, fmt.Errorf("URL cannot be empty")
+	cleanURL, err := config.ValidateAllowedMediaURL(url)
+	if err != nil {
+		return nil, err
 	}
+	url = cleanURL
 
 	// Get authentication arguments
 	authArgs, err := d.getEffectiveAuthArgs()
@@ -276,10 +285,11 @@ func (d *YouTubeDownloader) GetVideoInfo(ctx context.Context, url string) (*conf
 
 // GetPlaylistInfo implements the Downloader interface
 func (d *YouTubeDownloader) GetPlaylistInfo(ctx context.Context, url string) (*config.VideoInfo, error) {
-	url = SanitizeURL(url)
-	if url == "" {
-		return nil, fmt.Errorf("URL cannot be empty")
+	cleanURL, err := config.ValidateAllowedMediaURL(url)
+	if err != nil {
+		return nil, err
 	}
+	url = cleanURL
 
 	// Get authentication arguments
 	authArgs, err := d.getEffectiveAuthArgs()

@@ -269,7 +269,7 @@ func GetConfigPath() string {
 // CreateDefaultConfig creates a default config file at the specified path.
 func CreateDefaultConfig(configPath string) error {
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("error creating config directory: %w", err)
 	}
 
@@ -279,7 +279,7 @@ func CreateDefaultConfig(configPath string) error {
 		if readErr != nil {
 			return fmt.Errorf("error reading example config: %w", readErr)
 		}
-		if writeErr := os.WriteFile(configPath, input, 0644); writeErr != nil {
+		if writeErr := os.WriteFile(configPath, input, 0600); writeErr != nil {
 			return fmt.Errorf("error writing config file: %w", writeErr)
 		}
 		return nil
@@ -323,7 +323,7 @@ server:
   token: ""
 `
 
-	if err := os.WriteFile(configPath, []byte(defaultContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(defaultContent), 0600); err != nil {
 		return fmt.Errorf("error writing default config: %w", err)
 	}
 

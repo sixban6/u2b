@@ -23,6 +23,7 @@ var (
 
 	configPath  string
 	verbose     bool
+	noSandbox   bool
 	outputDir   string
 	fileName    string
 	quality     string
@@ -171,6 +172,7 @@ func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "config file (default is ./config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().BoolVar(&noSandbox, "no-sandbox", false, "disable macOS Seatbelt sandbox around yt-dlp/ffmpeg")
 
 	// Register download flags on both rootCmd (for direct `u2b -o ... URL`) and downloadCmd
 	registerDownloadFlags(rootCmd)
@@ -210,13 +212,9 @@ var versionCmd = &cobra.Command{
 	},
 }
 
-// sanitizeInputURL removes shell-escaped backslashes (e.g. zsh's \? \= \&) from URLs.
+// sanitizeInputURL extracts HTTP(S) URLs from raw text (including app share snippets) and removes shell escapes.
 func sanitizeInputURL(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
-		return strings.ReplaceAll(trimmed, `\`, "")
-	}
-	return trimmed
+	return config.ExtractMediaURL(raw)
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
@@ -234,7 +232,10 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 // runDownload executes the download command
 func runDownload(cmd *cobra.Command, args []string) error {
-	url := sanitizeInputURL(args[0])
+	url, err := config.ValidateAllowedMediaURL(args[0])
+	if err != nil {
+		return err
+	}
 
 	// Load configuration
 	cfg, err := loadConfig()
@@ -469,19 +470,29 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 		ytdlpPath = path
 	}
 
+	cleanURL, err := config.ValidateAllowedMediaURL(url)
+	if err != nil {
+		return err
+	}
+
 	// Build arguments
 	args := []string{
 		"--output", filepath.Join(outputDir, "%(playlist_index)02d - %(title)s [%(id)s].%(ext)s"),
 		"--extractor-args", "youtube:client=web_creator",
 	}
+	var extraReadFiles []string
 	if cfg.Auth.Method == config.AuthMethodCookiesFile && cfg.Auth.CookiesFile != "" {
 		args = append(args, "--cookies", cfg.Auth.CookiesFile)
+		extraReadFiles = append(extraReadFiles, cfg.Auth.CookiesFile)
 	} else if cfg.Auth.Method == config.AuthMethodBrowser && cfg.Auth.Browser != "" {
 		args = append(args, "--cookies-from-browser", cfg.Auth.Browser)
-	} else if cached := resolveCachedCookiesFile(); cached != "" {
-		args = append(args, "--cookies", cached)
-	} else if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		args = append(args, "--cookies-from-browser", "brave")
+	} else if config.IsYouTubeURL(cleanURL) {
+		if cached := resolveCachedCookiesFile(); cached != "" {
+			args = append(args, "--cookies", cached)
+			extraReadFiles = append(extraReadFiles, cached)
+		} else if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+			args = append(args, "--cookies-from-browser", "brave")
+		}
 	}
 
 	if ffmpegLoc := downloader.FindFFmpegLocation(); ffmpegLoc != "" {
@@ -511,7 +522,7 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 		} else {
 			height, ok := config.QualityToHeight(normQ)
 			if !ok {
-				height = normQ
+				height = "1080"
 			}
 			args = append(args,
 				"--format", fmt.Sprintf("bestvideo[height<=%s]+bestaudio[ext=m4a]/bestvideo[height<=%s]+bestaudio/best[height<=%s]/best", height, height, height),
@@ -521,10 +532,10 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 		}
 	}
 
-	args = append(args, url)
+	args = append(args, "--", cleanURL)
 
-	// Execute yt-dlp
-	cmd := exec.CommandContext(ctx, ytdlpPath, args...)
+	// Execute yt-dlp inside macOS Seatbelt sandbox when on Darwin
+	cmd := downloader.WrapCommandInSandbox(ctx, ytdlpPath, args, outputDir, extraReadFiles, cfg.Advanced.NoSandbox)
 	downloader.HideConsole(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -536,7 +547,10 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 
 // runInfo executes the info command
 func runInfo(cmd *cobra.Command, args []string) error {
-	url := sanitizeInputURL(args[0])
+	url, err := config.ValidateAllowedMediaURL(args[0])
+	if err != nil {
+		return err
+	}
 
 	// Load configuration
 	cfg, err := loadConfig()
@@ -711,6 +725,9 @@ func overrideConfigWithFlags(cfg *config.Config) {
 	}
 	if verbose {
 		cfg.Advanced.Verbose = true
+	}
+	if noSandbox {
+		cfg.Advanced.NoSandbox = true
 	}
 
 	// Ensure output directory exists

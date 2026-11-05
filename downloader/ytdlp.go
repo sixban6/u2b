@@ -373,8 +373,16 @@ func (y *YtdlpExecutor) Download(ctx context.Context, options *YtdlpOptions) (*D
 	// Build command arguments
 	args := y.BuildDownloadArgs(options)
 
-	// Create command
-	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
+	// Create command (wrapped in macOS Seatbelt sandbox when on Darwin)
+	noSandbox := y.Config != nil && y.Config.Advanced.NoSandbox
+	cmd := WrapCommandInSandbox(
+		ctx,
+		y.ytdlpPath,
+		args,
+		options.OutputDir,
+		ExtractCookieFilesFromArgs(options.AuthArgs),
+		noSandbox,
+	)
 	HideConsole(cmd)
 
 	// Set up output capture for progress monitoring
@@ -480,9 +488,10 @@ func (y *YtdlpExecutor) GetPlaylistInfo(ctx context.Context, url string, authArg
 	}
 
 	// Add YouTube-specific arguments
-	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.Config.YouTube.Client), url)
+	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.Config.YouTube.Client), "--", url)
 
-	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
+	noSandbox := y.Config != nil && y.Config.Advanced.NoSandbox
+	cmd := WrapCommandInSandbox(ctx, y.ytdlpPath, args, "", ExtractCookieFilesFromArgs(authArgs), noSandbox)
 	HideConsole(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -520,9 +529,10 @@ func (y *YtdlpExecutor) GetVideoInfo(ctx context.Context, url string, authArgs [
 	}
 
 	// Add YouTube-specific arguments
-	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.Config.YouTube.Client), url)
+	args = append(args, "--extractor-args", fmt.Sprintf("youtube:client=%s", y.Config.YouTube.Client), "--", url)
 
-	cmd := exec.CommandContext(ctx, y.ytdlpPath, args...)
+	noSandbox := y.Config != nil && y.Config.Advanced.NoSandbox
+	cmd := WrapCommandInSandbox(ctx, y.ytdlpPath, args, "", ExtractCookieFilesFromArgs(authArgs), noSandbox)
 	HideConsole(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -652,7 +662,7 @@ func (y *YtdlpExecutor) BuildDownloadArgs(options *YtdlpOptions) []string {
 		} else {
 			height, ok := config.QualityToHeight(normQ)
 			if !ok {
-				height = normQ
+				height = "1080"
 			}
 			args = append(args,
 				"--format", fmt.Sprintf("bestvideo[height<=%s]+bestaudio[ext=m4a]/bestvideo[height<=%s]+bestaudio/best[height<=%s]/best", height, height, height),
@@ -695,8 +705,8 @@ func (y *YtdlpExecutor) BuildDownloadArgs(options *YtdlpOptions) []string {
 		args = append(args, options.ExtraArgs...)
 	}
 
-	// Add URL last
-	args = append(args, options.URL)
+	// Add URL last after '--' option terminator to prevent flag injection
+	args = append(args, "--", options.URL)
 
 	return args
 }

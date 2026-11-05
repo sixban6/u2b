@@ -36,6 +36,7 @@ var (
 	serveListen   string
 	serveToken    string
 	serveGenToken bool
+	serveNoAuth   bool
 	serveOpen     bool
 )
 
@@ -53,8 +54,9 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", 0, "port to listen on (default 8989)")
 	serveCmd.Flags().StringVar(&serveListen, "listen", "", "listen address (default 0.0.0.0:8989)")
-	serveCmd.Flags().StringVar(&serveToken, "token", "", "optional API access token for remote security")
-	serveCmd.Flags().BoolVar(&serveGenToken, "gen-token", false, "generate a random access token for this session")
+	serveCmd.Flags().StringVar(&serveToken, "token", "", "optional API access token (auto-generated & persisted by default)")
+	serveCmd.Flags().BoolVar(&serveGenToken, "gen-token", false, "regenerate a fresh random access token")
+	serveCmd.Flags().BoolVar(&serveNoAuth, "no-auth", false, "disable token authentication (NOT recommended on shared networks)")
 	serveCmd.Flags().BoolVar(&serveOpen, "open", false, "open the iPhone setup QR guide in local browser on startup")
 
 	rootCmd.AddCommand(serveCmd)
@@ -153,6 +155,40 @@ func generateRandomToken() string {
 	return hex.EncodeToString(b[:])
 }
 
+func serverTokenFilePath() string {
+	return filepath.Join(ensureSecureU2BDir(), "server_token")
+}
+
+// resolveOrCreateServerToken returns the configured token, or loads/creates a persistent
+// random 24-hex-char security token in ~/u2b/server_token (mode 0600) so `u2b serve`
+// is never exposed unauthenticated on public Wi-Fi by default.
+func resolveOrCreateServerToken(explicitToken, cfgToken string, forceRegen, disableAuth bool) string {
+	if disableAuth {
+		return ""
+	}
+	if tok := strings.TrimSpace(explicitToken); tok != "" {
+		return tok
+	}
+	if tok := strings.TrimSpace(cfgToken); tok != "" && !forceRegen {
+		return tok
+	}
+
+	tokenPath := serverTokenFilePath()
+	if !forceRegen {
+		if data, err := os.ReadFile(tokenPath); err == nil {
+			if existing := strings.TrimSpace(string(data)); len(existing) >= 8 {
+				_ = os.Chmod(tokenPath, 0600)
+				return existing
+			}
+		}
+	}
+
+	fresh := generateRandomToken()
+	_ = os.WriteFile(tokenPath, []byte(fresh+"\n"), 0600)
+	_ = os.Chmod(tokenPath, 0600)
+	return fresh
+}
+
 func runServe(cmd *cobra.Command, args []string) error {
 	EnsureEnvironmentPath()
 
@@ -166,13 +202,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	token := strings.TrimSpace(serveToken)
-	if token == "" {
-		token = strings.TrimSpace(cfg.Server.Token)
-	}
-	if serveGenToken && token == "" {
-		token = generateRandomToken()
-	}
+	token := resolveOrCreateServerToken(serveToken, cfg.Server.Token, serveGenToken, serveNoAuth)
 
 	srv := NewU2BServer(listenAddr, port, token)
 	httpServer := &http.Server{
@@ -401,8 +431,36 @@ func (s *U2BServer) isAuthorized(r *http.Request) bool {
 	return false
 }
 
+func isCrossSiteBrowserRequest(r *http.Request) bool {
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
+		return true
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin != "" {
+		if origin == "null" {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil || u.Host == "" || !strings.EqualFold(u.Host, r.Host) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *U2BServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+
+		if isCrossSiteBrowserRequest(r) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": "安全拦截：拒绝跨站请求 (CSRF blocked)",
+			})
+			return
+		}
+
 		if !s.isAuthorized(r) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{
 				"ok":    false,
@@ -429,6 +487,8 @@ func (s *U2BServer) handleIndexPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
 	if s.token != "" && s.isAuthorized(r) && r.URL.Query().Get("token") != "" {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "u2b_token",
@@ -645,13 +705,17 @@ func (s *U2BServer) handleAPITasks(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid JSON body"})
 			return
 		}
-		cleanURL := sanitizeInputURL(req.URL)
-		if cleanURL == "" || (!strings.HasPrefix(cleanURL, "http://") && !strings.HasPrefix(cleanURL, "https://")) {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "请输入有效的视频 URL"})
+		cleanURL, err := config.ValidateAllowedMediaURL(req.URL)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
 
-		outDir, dirLabel := resolveTargetOutputDir(req.Format, req.OutputDir, req.Category)
+		outDir, dirLabel, dirErr := resolveTargetOutputDir(req.Format, req.OutputDir, req.Category)
+		if dirErr != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": dirErr.Error()})
+			return
+		}
 		task := s.enqueueDownload(cleanURL, req.Title, req.Format, req.Quality, outDir, req.Filename, req.IsPlaylist)
 		_ = dirLabel
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -818,15 +882,15 @@ func (s *U2BServer) handleAPIQuick(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cleanURL := sanitizeInputURL(rawURL)
-	if cleanURL == "" || (!strings.HasPrefix(cleanURL, "http://") && !strings.HasPrefix(cleanURL, "https://")) {
+	cleanURL, urlErr := config.ValidateAllowedMediaURL(rawURL)
+	if urlErr != nil {
 		if plainMode {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte("⚠️ 未检测到有效的视频链接"))
+			_, _ = w.Write([]byte("⚠️ " + urlErr.Error()))
 			return
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "未检测到有效的视频链接"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": urlErr.Error()})
 		return
 	}
 
@@ -848,7 +912,17 @@ func (s *U2BServer) handleAPIQuick(w http.ResponseWriter, r *http.Request) {
 		quality = config.Quality1080p
 	}
 
-	resolvedDir, dirLabel := resolveTargetOutputDir(format, outputDir, category)
+	resolvedDir, dirLabel, dirErr := resolveTargetOutputDir(format, outputDir, category)
+	if dirErr != nil {
+		if plainMode {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte("⚠️ " + dirErr.Error()))
+			return
+		}
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": dirErr.Error()})
+		return
+	}
 
 	if !waitMode {
 		isPlaylist := strings.Contains(cleanURL, "youtube.com/playlist")
@@ -964,7 +1038,26 @@ func (s *U2BServer) handleAPIShortcutImportMac(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func resolveTargetOutputDir(format, explicitDir, categoryName string) (string, string) {
+func isSubpathOrEqual(candidate, allowedRoot string) bool {
+	if candidate == "" || allowedRoot == "" {
+		return false
+	}
+	absCand, err1 := filepath.Abs(filepath.Clean(candidate))
+	absRoot, err2 := filepath.Abs(filepath.Clean(allowedRoot))
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if absCand == absRoot {
+		return true
+	}
+	rel, err := filepath.Rel(absRoot, absCand)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func resolveTargetOutputDir(format, explicitDir, categoryName string) (string, string, error) {
 	presets := loadExtensionPresets()
 	dirs := presets.VideoDirs
 	defaultDir := presets.DefaultVideoDir
@@ -979,29 +1072,52 @@ func resolveTargetOutputDir(format, explicitDir, categoryName string) (string, s
 	}
 
 	if trimmedDir := strings.TrimSpace(explicitDir); trimmedDir != "" {
-		for _, d := range dirs {
-			if d.Path == trimmedDir {
-				return d.Path, d.Label
+		for _, seg := range strings.Split(strings.ReplaceAll(trimmedDir, `\`, "/"), "/") {
+			if seg == ".." {
+				return "", "", fmt.Errorf("安全拦截：目录路径包含非法上级穿越 '..'")
 			}
 		}
-		if abs, err := filepath.Abs(trimmedDir); err == nil {
-			return abs, filepath.Base(abs)
+		absCand, err := filepath.Abs(filepath.Clean(trimmedDir))
+		if err != nil {
+			return "", "", fmt.Errorf("无效的目录路径")
 		}
+
+		// Allow exact match against configured VideoDirs / AudioDirs / DefaultDirs
+		for _, d := range presets.VideoDirs {
+			if absPreset, err := filepath.Abs(filepath.Clean(d.Path)); err == nil && absCand == absPreset {
+				return absPreset, d.Label, nil
+			}
+		}
+		for _, d := range presets.AudioDirs {
+			if absPreset, err := filepath.Abs(filepath.Clean(d.Path)); err == nil && absCand == absPreset {
+				return absPreset, d.Label, nil
+			}
+		}
+		// Or subdirectories strictly under VideoRootDir / AudioRootDir / DefaultVideoDir / DefaultAudioDir
+		for _, allowedRoot := range []string{presets.VideoRootDir, presets.AudioRootDir, presets.DefaultVideoDir, presets.DefaultAudioDir} {
+			if isSubpathOrEqual(absCand, allowedRoot) {
+				return absCand, filepath.Base(absCand), nil
+			}
+		}
+
+		return "", "", fmt.Errorf("安全拦截：不允许写入未授权目录 %q（仅允许已配置的影音目录及其子分类）", trimmedDir)
 	}
 
-	if cat := sanitizeFolderName(categoryName); cat != "" {
+	if cat := sanitizeFolderName(categoryName); cat != "" && cat != "." && cat != ".." {
 		for _, d := range dirs {
 			if strings.EqualFold(d.Label, cat) {
-				return d.Path, d.Label
+				return d.Path, d.Label, nil
 			}
 		}
 		if rootDir != "" {
 			joined := filepath.Join(rootDir, cat)
-			return joined, cat
+			if isSubpathOrEqual(joined, rootDir) {
+				return joined, cat, nil
+			}
 		}
 	}
 
-	return defaultDir, defaultLabel
+	return defaultDir, defaultLabel, nil
 }
 
 func (s *U2BServer) enqueueDownload(urlStr, title, format, quality, outputDir, filename string, isPlaylist bool) *ServerTask {
@@ -1085,8 +1201,8 @@ func (s *U2BServer) executeServerTask(ctx context.Context, id string) {
 	_ = os.MkdirAll(t.OutputDir, 0755)
 	cfg.Download.OutputDir = t.OutputDir
 
-	// Automatically attach synced desktop Brave cookies if auth is currently unconfigured
-	if cfg.Auth.Method == config.AuthMethodNone {
+	// Automatically attach synced desktop Brave cookies only for YouTube URLs
+	if cfg.Auth.Method == config.AuthMethodNone && config.IsYouTubeURL(t.URL) {
 		if cachedCookie := resolveCachedCookiesFile(); cachedCookie != "" {
 			cfg.Auth.Method = config.AuthMethodCookiesFile
 			cfg.Auth.CookiesFile = cachedCookie
@@ -1249,10 +1365,11 @@ func serverTasksHistoryPath() string {
 
 func (s *U2BServer) persistTasks() {
 	list := s.listTasksSorted()
+	ensureSecureU2BDir()
 	path := serverTasksHistoryPath()
-	_ = os.MkdirAll(filepath.Dir(path), 0755)
 	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
 		_ = os.WriteFile(path, data, 0600)
+		_ = os.Chmod(path, 0600)
 	}
 }
 

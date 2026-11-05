@@ -395,12 +395,12 @@ func runNativeHost(cmd *cobra.Command, args []string) error {
 }
 
 func handleNativeDownload(ctx context.Context, msg nativeIncomingMessage, sendMsg func(any)) {
-	url := sanitizeInputURL(msg.URL)
-	if url == "" {
+	url, err := config.ValidateAllowedMediaURL(msg.URL)
+	if err != nil {
 		sendMsg(map[string]any{
 			"type":  "error",
 			"id":    msg.ID,
-			"error": "URL 不能为空",
+			"error": err.Error(),
 		})
 		return
 	}
@@ -432,13 +432,15 @@ func handleNativeDownload(ctx context.Context, msg nativeIncomingMessage, sendMs
 	// and persist to cookies_cache.txt so mobile `u2b serve` also shares membership auth!
 	if strings.TrimSpace(msg.Cookies) != "" {
 		saveCachedCookies(msg.Cookies)
-		tmpCookie, err := os.CreateTemp("", "u2b_ext_cookies_*.txt")
-		if err == nil {
-			defer os.Remove(tmpCookie.Name())
-			_, _ = tmpCookie.WriteString(msg.Cookies)
-			_ = tmpCookie.Close()
-			cfg.Auth.Method = config.AuthMethodCookiesFile
-			cfg.Auth.CookiesFile = tmpCookie.Name()
+		if config.IsYouTubeURL(url) {
+			tmpCookie, err := os.CreateTemp("", "u2b_ext_cookies_*.txt")
+			if err == nil {
+				defer os.Remove(tmpCookie.Name())
+				_, _ = tmpCookie.WriteString(msg.Cookies)
+				_ = tmpCookie.Close()
+				cfg.Auth.Method = config.AuthMethodCookiesFile
+				cfg.Auth.CookiesFile = tmpCookie.Name()
+			}
 		}
 	}
 
@@ -598,14 +600,23 @@ func cookieCacheFilePath() string {
 	return filepath.Join(homeDir, "u2b", "cookies_cache.txt")
 }
 
+func ensureSecureU2BDir() string {
+	homeDir, _ := os.UserHomeDir()
+	baseDir := filepath.Join(homeDir, "u2b")
+	_ = os.MkdirAll(baseDir, 0700)
+	_ = os.Chmod(baseDir, 0700)
+	return baseDir
+}
+
 func saveCachedCookies(raw string) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || !strings.Contains(trimmed, "youtube.com") {
 		return
 	}
+	ensureSecureU2BDir()
 	target := cookieCacheFilePath()
-	_ = os.MkdirAll(filepath.Dir(target), 0755)
 	_ = os.WriteFile(target, []byte(trimmed+"\n"), 0600)
+	_ = os.Chmod(target, 0600)
 }
 
 func resolveCachedCookiesFile() string {
@@ -663,15 +674,17 @@ func loadExtensionPresets() *ExtensionPresetsConfig {
 }
 
 func saveExtensionPresets(cfg *ExtensionPresetsConfig) error {
+	ensureSecureU2BDir()
 	path := presetsFilePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	_ = os.Chmod(path, 0600)
+	return nil
 }
 
 // detectDefaultMediaRoots dynamically probes mounted external volumes and OS standard media directories
