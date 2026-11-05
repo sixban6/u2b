@@ -385,7 +385,7 @@ choose_install_dir() {
 
 ensure_path() {
   local dir="$1"
-  if [[ ":$PATH:" == *":$dir:"* ]]; then
+  if [[ "${U2B_NO_MODIFY_PATH:-0}" -eq 1 ]] || [[ ":$PATH:" == *":$dir:"* ]]; then
     return 0
   fi
 
@@ -402,7 +402,7 @@ ensure_path() {
       log "Adding '$dir' to $shell_rc"
       printf '\n# u2b path\nexport PATH="%s:$PATH"\n' "$dir" >> "$shell_rc"
     fi
-    log "Run 'source %s' or open a new terminal session to use 'u2b'." "$shell_rc"
+    log "Run 'source ${shell_rc}' or open a new terminal session to use 'u2b'."
   fi
 }
 
