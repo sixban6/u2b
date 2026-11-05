@@ -50,6 +50,7 @@ Examples:
   u2b -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b -m -o ./downloads -n "Star Sky" "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b serve
+  u2b update
   u2b pl "https://www.youtube.com/playlist?list=PLAYLIST_ID"
   u2b info "https://www.youtube.com/watch?v=VIDEO_ID"`,
 	Version:      Version,

@@ -26,6 +26,16 @@ irm https://raw.githubusercontent.com/sixban6/u2b/main/install.ps1 | iex
 ```
 > 或克隆仓库后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`（支持 `-Version v1.x.x`、`-RequireAttestation`）。脚本将自动识别架构（x64 / ARM64），下载 GitHub 最新 Release 预编译包并执行 SHA-256 完整性校验与防路径穿越检查，通过 `winget` 自动安装 `yt-dlp` 与 `ffmpeg`，加入用户 PATH 并配置 Chromium 浏览器原生通信宿主。
 
+### 🔄 后续一键自更新（无需再次 `curl`）
+
+首次安装完成后，后续升级只需在任意终端运行内置自更新命令：
+
+```bash
+u2b update          # 自动下载最新 Release、执行安全校验、原子替换并同步刷新扩展与后台服务
+u2b update --check  # 仅检查是否有新版本
+u2b update --deps   # 更新 u2b 的同时一并升级 yt-dlp
+```
+
 ### 🔐 内置安全校验说明
 
 一键安装脚本默认强制启用多层安全防护（校验失败立即中止安装，绝不执行未知文件）：
