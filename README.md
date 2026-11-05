@@ -6,16 +6,16 @@
 
 ## 🚀 极速一键安装（推荐）
 
-通过 GitHub Actions 自动编译与 Releases 发布，**无需本地安装 Go 编译环境**，秒级部署：
+通过 GitHub Actions 原生矩阵自动编译并发布最新 GitHub Release（覆盖 **macOS Apple Silicon `arm64` / Intel `amd64`**、**Windows 11/10 `amd64` / `arm64`**、**Linux `amd64` / `arm64`**），**无需本地安装 Go 编译环境**，秒级部署并自动完成多重安全校验：
 
 ### macOS / Linux
 
 打开终端执行以下一行命令：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sixban6/u2b/main/install.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/sixban6/u2b/main/install.sh | bash
 ```
-> 或克隆仓库后运行 `./install.sh`。脚本将自动识别系统架构（Apple Silicon M系列 / Intel x64 / Linux arm64 / amd64），优先下载官方 Release 预编译二进制，通过 Homebrew / apt / dnf 补齐 `yt-dlp` 与 `ffmpeg`，并自动部署浏览器扩展。
+> 或克隆仓库后运行 `./install.sh`（支持 `--version v1.x.x` 指定版本、`--require-attestation` 强制校验证书溯源）。脚本将自动识别真实硬件架构（兼容 Rosetta 2 终端识别 Apple Silicon），自动拉取 GitHub 最新 Release 二进制包并完成 SHA-256 与签名校验，通过 Homebrew / apt / dnf 补齐 `yt-dlp` 与 `ffmpeg`，并自动注册浏览器扩展。
 
 ### Windows 11 / Windows 10
 
@@ -24,7 +24,15 @@ curl -fsSL https://raw.githubusercontent.com/sixban6/u2b/main/install.sh | bash
 ```powershell
 irm https://raw.githubusercontent.com/sixban6/u2b/main/install.ps1 | iex
 ```
-> 或克隆仓库后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`。脚本将自动识别架构（x64 / ARM64），通过 `winget` 自动安装 `yt-dlp` 与 `ffmpeg`，加入用户 PATH 并自动配置 Chromium 浏览器原生通信宿主。
+> 或克隆仓库后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`（支持 `-Version v1.x.x`、`-RequireAttestation`）。脚本将自动识别架构（x64 / ARM64），下载 GitHub 最新 Release 预编译包并执行 SHA-256 完整性校验与防路径穿越检查，通过 `winget` 自动安装 `yt-dlp` 与 `ffmpeg`，加入用户 PATH 并配置 Chromium 浏览器原生通信宿主。
+
+### 🔐 内置安全校验说明
+
+一键安装脚本默认强制启用多层安全防护（校验失败立即中止安装，绝不执行未知文件）：
+1. **传输与来源锁定**：强制 HTTPS TLS 1.2+，严格校验 `github.com/sixban6/u2b` 官方 Release 下载源与语义化版本标签；
+2. **SHA-256 完整性双重核验**：下载官方 `checksums.txt` 并与 GitHub Releases API 资产摘要交叉比对，校验压缩包本地 SHA-256 哈希；
+3. **SLSA 构建溯源证明（GitHub Attestations）**：GitHub Actions 自动签发 OIDC/Sigstore 构建证明；若本地已登录 `gh` CLI，安装脚本会自动调用 `gh attestation verify` 验证产物确由本仓库工作流编译（亦可手动执行验证）；
+4. **解包防护与运行前自检**：解压前扫描拦截 `..` 路径穿越（Tar-Slip / Zip-Slip），macOS 额外校验 Mach-O `codesign` 签名，并在原子替换前通过沙箱临时目录自检运行。
 
 ---
 

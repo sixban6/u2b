@@ -91,13 +91,16 @@ if [[ "$BUILD_ALL" -eq 1 ]]; then
     mkdir -p "$BUILD_DIR"
     
     CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build -ldflags "$LDFLAGS" -trimpath -o "${BUILD_DIR}/${BIN_NAME}" .
+    if [[ "$OS" == "darwin" ]] && command -v codesign >/dev/null 2>&1; then
+      codesign --force --sign - "${BUILD_DIR}/${BIN_NAME}"
+    fi
     cp README.md LICENSE "${BUILD_DIR}/"
 
     ARCHIVE_NAME="u2b-${OS}-${ARCH}"
     if [ "$PKG_TYPE" = "zip" ]; then
-      (cd "$BUILD_DIR" && zip -9 -q -r "../dist/${ARCHIVE_NAME}.zip" .)
+      (cd "$BUILD_DIR" && zip -9 -q "../dist/${ARCHIVE_NAME}.zip" "${BIN_NAME}" README.md LICENSE)
     else
-      tar -czf "dist/${ARCHIVE_NAME}.tar.gz" -C "$BUILD_DIR" .
+      COPYFILE_DISABLE=1 tar -czf "dist/${ARCHIVE_NAME}.tar.gz" -C "$BUILD_DIR" "${BIN_NAME}" README.md LICENSE
     fi
     rm -rf "$BUILD_DIR"
   done
@@ -105,9 +108,9 @@ if [[ "$BUILD_ALL" -eq 1 ]]; then
   (
     cd dist
     if command -v sha256sum >/dev/null 2>&1; then
-      sha256sum * > checksums.txt
+      sha256sum u2b-* > checksums.txt
     elif command -v shasum >/dev/null 2>&1; then
-      shasum -a 256 * > checksums.txt
+      shasum -a 256 u2b-* > checksums.txt
     fi
     echo "==> Created packages in dist/:"
     ls -lh

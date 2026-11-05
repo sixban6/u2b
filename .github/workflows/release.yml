@@ -1,100 +1,379 @@
-name: Release
+name: Build & Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name (e.g. v1.0.1)'
+        description: 'Release tag name (e.g. v1.1.0, leave empty to auto-bump)'
         required: false
         default: ''
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build-and-release:
-    name: Build & Release Binaries
+  prepare:
+    name: Test & Resolve Version
     runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.meta.outputs.should_release }}
+      tag: ${{ steps.meta.outputs.tag }}
+      commit: ${{ steps.meta.outputs.commit }}
+      build_date: ${{ steps.meta.outputs.build_date }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.22'
           check-latest: true
 
-      - name: Determine Version
+      - name: Run unit tests
+        run: go test -v ./...
+
+      - name: Determine Release Version
         id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag_name }}
         run: |
-          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
-            TAG="${{ github.event.inputs.tag_name }}"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          set -euo pipefail
+          git fetch --tags --force || true
+
+          SHOULD_RELEASE="true"
+          TAG=""
+
+          if [ -n "${INPUT_TAG:-}" ]; then
+            TAG="${INPUT_TAG}"
+            if [[ "$TAG" != v* ]]; then
+              TAG="v${TAG}"
+            fi
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            TAG="v1.0.0"
+            HEAD_TAG="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+            if [ -n "$HEAD_TAG" ]; then
+              if [ "${GITHUB_EVENT_NAME}" = "push" ] && gh release view "$HEAD_TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+                echo "Release $HEAD_TAG already exists for HEAD; skipping duplicate release."
+                SHOULD_RELEASE="false"
+                TAG="$HEAD_TAG"
+              else
+                TAG="$HEAD_TAG"
+              fi
+            else
+              LATEST_TAG="$(
+                {
+                  git tag -l 'v*'
+                  gh release list --repo "${GITHUB_REPOSITORY}" --limit 50 --json tagName --jq '.[].tagName' 2>/dev/null || true
+                } | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true
+              )"
+              if [ -z "$LATEST_TAG" ]; then
+                TAG="v1.0.0"
+              else
+                VER="${LATEST_TAG#v}"
+                IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
+                TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              fi
+            fi
           fi
+
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: invalid tag format '$TAG'" >&2
+            exit 1
+          fi
+
           COMMIT="$(git rev-parse --short HEAD)"
           BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          echo "should_release=${SHOULD_RELEASE}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
-          echo "date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          echo "==> Version resolved: tag=${TAG}, commit=${COMMIT}, build_date=${BUILD_DATE}, should_release=${SHOULD_RELEASE}"
 
-      - name: Build and Package Binaries
-        env:
-          TAG: ${{ steps.meta.outputs.tag }}
-          COMMIT: ${{ steps.meta.outputs.commit }}
-          DATE: ${{ steps.meta.outputs.date }}
+  build-macos:
+    name: Build macOS (arm64 & amd64)
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Validate installer & run macOS tests
         run: |
+          bash -n install.sh
+          go test -short ./...
+
+      - name: Build, Sign & Package macOS Binaries
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          DATE: ${{ needs.prepare.outputs.build_date }}
+        run: |
+          set -euo pipefail
           mkdir -p dist
           LDFLAGS="-s -w -X github.com/sixban6/u2b/cmd.Version=${TAG} -X github.com/sixban6/u2b/cmd.GitCommit=${COMMIT} -X github.com/sixban6/u2b/cmd.BuildDate=${DATE}"
 
-          # Format: OS/ARCH/BINARY_NAME/PACKAGE_TYPE
-          TARGETS=(
-            "darwin/amd64/u2b/tar.gz"
-            "darwin/arm64/u2b/tar.gz"
-            "linux/amd64/u2b/tar.gz"
-            "linux/arm64/u2b/tar.gz"
-            "windows/amd64/u2b.exe/zip"
-            "windows/arm64/u2b.exe/zip"
-          )
-
-          for TARGET in "${TARGETS[@]}"; do
-            IFS="/" read -r OS ARCH BIN_NAME PKG_TYPE <<< "$TARGET"
-            echo "==> Building for ${OS}/${ARCH}..."
-            BUILD_DIR="build_${OS}_${ARCH}"
+          HOST_ARCH="$(uname -m)"
+          for ARCH in arm64 amd64; do
+            echo "==> Building darwin/${ARCH}..."
+            BUILD_DIR="build_darwin_${ARCH}"
             mkdir -p "$BUILD_DIR"
-            
-            CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build -ldflags "$LDFLAGS" -trimpath -o "${BUILD_DIR}/${BIN_NAME}" .
-            cp README.md LICENSE "${BUILD_DIR}/"
 
-            ARCHIVE_NAME="u2b-${OS}-${ARCH}"
-            if [ "$PKG_TYPE" = "zip" ]; then
-              (cd "$BUILD_DIR" && zip -9 -q -r "../dist/${ARCHIVE_NAME}.zip" .)
-            else
-              tar -czf "dist/${ARCHIVE_NAME}.tar.gz" -C "$BUILD_DIR" .
+            CGO_ENABLED=0 GOOS=darwin GOARCH="${ARCH}" go build -trimpath -ldflags "$LDFLAGS" -o "${BUILD_DIR}/u2b" .
+            chmod 0755 "${BUILD_DIR}/u2b"
+
+            # Apply and verify native Apple ad-hoc code signature
+            codesign --force --sign - "${BUILD_DIR}/u2b"
+            codesign --verify --verbose "${BUILD_DIR}/u2b"
+
+            # Smoke-test native architecture binary
+            if { [ "$ARCH" = "arm64" ] && [ "$HOST_ARCH" = "arm64" ]; } || { [ "$ARCH" = "amd64" ] && [ "$HOST_ARCH" = "x86_64" ]; }; then
+              "${BUILD_DIR}/u2b" version
             fi
+
+            cp README.md LICENSE "${BUILD_DIR}/"
+            COPYFILE_DISABLE=1 tar --no-xattrs -czf "dist/u2b-darwin-${ARCH}.tar.gz" -C "$BUILD_DIR" u2b README.md LICENSE
             rm -rf "$BUILD_DIR"
           done
+          ls -lh dist/
+
+      - name: Upload macOS Packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: pkg-darwin
+          path: dist/u2b-darwin-*.tar.gz
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (amd64 & arm64)
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Validate installer & run Windows tests
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "./install.ps1"), [ref]$null, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+          go test -short ./...
+
+      - name: Build & Package Windows Binaries
+        shell: pwsh
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          DATE: ${{ needs.prepare.outputs.build_date }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $ldflags = "-s -w -X github.com/sixban6/u2b/cmd.Version=$env:TAG -X github.com/sixban6/u2b/cmd.GitCommit=$env:COMMIT -X github.com/sixban6/u2b/cmd.BuildDate=$env:DATE"
+
+          foreach ($arch in @("amd64", "arm64")) {
+            Write-Host "==> Building windows/$arch..."
+            $buildDir = "build_windows_$arch"
+            New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+
+            $env:CGO_ENABLED = "0"
+            $env:GOOS = "windows"
+            $env:GOARCH = $arch
+            go build -trimpath -ldflags $ldflags -o "$buildDir/u2b.exe" .
+            if ($LASTEXITCODE -ne 0) { throw "go build failed for windows/$arch" }
+
+            if ($arch -eq "amd64") {
+              & ".\$buildDir\u2b.exe" version
+              if ($LASTEXITCODE -ne 0) { throw "u2b.exe smoke test failed" }
+            }
+
+            Copy-Item README.md, LICENSE -Destination $buildDir
+            Compress-Archive -Path "$buildDir/u2b.exe", "$buildDir/README.md", "$buildDir/LICENSE" -DestinationPath "dist/u2b-windows-$arch.zip" -CompressionLevel Optimal -Force
+            Remove-Item -Recurse -Force $buildDir
+          }
+          Get-ChildItem dist
+
+      - name: Upload Windows Packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: pkg-windows
+          path: dist/u2b-windows-*.zip
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux (amd64 & arm64)
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Build & Package Linux Binaries
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          DATE: ${{ needs.prepare.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          LDFLAGS="-s -w -X github.com/sixban6/u2b/cmd.Version=${TAG} -X github.com/sixban6/u2b/cmd.GitCommit=${COMMIT} -X github.com/sixban6/u2b/cmd.BuildDate=${DATE}"
+
+          for ARCH in amd64 arm64; do
+            echo "==> Building linux/${ARCH}..."
+            BUILD_DIR="build_linux_${ARCH}"
+            mkdir -p "$BUILD_DIR"
+
+            CGO_ENABLED=0 GOOS=linux GOARCH="${ARCH}" go build -trimpath -ldflags "$LDFLAGS" -o "${BUILD_DIR}/u2b" .
+            chmod 0755 "${BUILD_DIR}/u2b"
+
+            if [ "$ARCH" = "amd64" ]; then
+              "${BUILD_DIR}/u2b" version
+            fi
+
+            cp README.md LICENSE "${BUILD_DIR}/"
+            tar -czf "dist/u2b-linux-${ARCH}.tar.gz" -C "$BUILD_DIR" u2b README.md LICENSE
+            rm -rf "$BUILD_DIR"
+          done
+          ls -lh dist/
+
+      - name: Upload Linux Packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: pkg-linux
+          path: dist/u2b-linux-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Attest & Publish GitHub Release
+    needs:
+      - prepare
+      - build-macos
+      - build-windows
+      - build-linux
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download All Platform Packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: pkg-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify Artifacts & Generate SHA-256 Checksums
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXPECTED_FILES=(
+            "u2b-darwin-arm64.tar.gz"
+            "u2b-darwin-amd64.tar.gz"
+            "u2b-windows-amd64.zip"
+            "u2b-windows-arm64.zip"
+            "u2b-linux-amd64.tar.gz"
+            "u2b-linux-arm64.tar.gz"
+          )
 
           cd dist
-          sha256sum * > checksums.txt
-          echo "==> Artifacts checksums:"
+          for f in "${EXPECTED_FILES[@]}"; do
+            if [ ! -s "$f" ]; then
+              echo "Error: missing or empty release artifact: $f" >&2
+              exit 1
+            fi
+          done
+
+          sha256sum "${EXPECTED_FILES[@]}" > checksums.txt
+          sha256sum -c checksums.txt
+          echo "==> Generated checksums.txt:"
           cat checksums.txt
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+          {
+            echo ""
+            echo "---"
+            echo "### 🔐 Security Verification (SHA-256 & SLSA Provenance)"
+            echo ""
+            echo "All release binaries are automatically verified with SHA-256 and SLSA provenance during one-click installation, or can be verified manually:"
+            echo ""
+            echo '```text'
+            cat checksums.txt
+            echo '```'
+            echo ""
+            echo '```bash'
+            echo "# Verify SHA-256 (macOS / Linux)"
+            echo "shasum -a 256 -c checksums.txt --ignore-missing"
+            echo ""
+            echo "# Verify GitHub Actions SLSA Build Provenance"
+            echo "gh attestation verify u2b-darwin-arm64.tar.gz --repo ${GITHUB_REPOSITORY}"
+            echo '```'
+          } > ../release_notes_footer.md
+
+      - name: Generate SLSA Build Provenance Attestations
+        uses: actions/attest-build-provenance@v4
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: Release ${{ steps.meta.outputs.tag }}
+          subject-path: 'dist/*'
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: u2b ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
+          append_body: true
+          body_path: release_notes_footer.md
+          make_latest: true
+          overwrite_files: true
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
           files: |
-            dist/*
+            dist/u2b-darwin-arm64.tar.gz
+            dist/u2b-darwin-amd64.tar.gz
+            dist/u2b-windows-amd64.zip
+            dist/u2b-windows-arm64.zip
+            dist/u2b-linux-amd64.tar.gz
+            dist/u2b-linux-arm64.tar.gz
+            dist/checksums.txt
