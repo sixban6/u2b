@@ -216,9 +216,75 @@ function updateBadge() {
   }
 }
 
-function notifyTab(tabId, payload) {
-  if (!tabId) return;
-  chrome.tabs.sendMessage(tabId, payload).catch(() => {});
+const SUPPORTED_DOC_PATTERNS = [
+  "*://*.youtube.com/*",
+  "*://youtu.be/*",
+  "*://*.bilibili.com/*",
+  "*://*.douyin.com/*",
+  "*://*.kuaishou.com/*",
+  "*://*.xiaohongshu.com/*",
+  "*://*.weibo.com/*",
+  "*://*.ixigua.com/*",
+  "*://*.x.com/*",
+  "*://*.twitter.com/*",
+  "*://*.tiktok.com/*",
+  "*://*.instagram.com/*",
+  "*://*.twitch.tv/*",
+  "*://*.vimeo.com/*"
+];
+
+async function ensureContentScriptInTab(tabId) {
+  if (!tabId || !chrome.scripting) return false;
+  try {
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
+  } catch (_) {}
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function sendToTabWithAutoInject(tabId, payload) {
+  if (!tabId) return null;
+  try {
+    return await chrome.tabs.sendMessage(tabId, payload);
+  } catch (_) {
+    const injected = await ensureContentScriptInTab(tabId);
+    if (!injected) return null;
+    try {
+      return await chrome.tabs.sendMessage(tabId, payload);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+async function notifyTab(tabId, payload) {
+  if (tabId) {
+    const res = await sendToTabWithAutoInject(tabId, payload);
+    if (res !== null) return;
+  }
+  // Fallback: if tabId was missing (e.g. Service Worker woke from sleep), notify current active supported tab
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab && activeTab.id && activeTab.id !== tabId && isSupportedMediaPage(activeTab.url)) {
+      await sendToTabWithAutoInject(activeTab.id, payload);
+    }
+  } catch (_) {}
+}
+
+async function injectContentIntoOpenTabs() {
+  if (!chrome.scripting || !chrome.tabs) return;
+  try {
+    const tabs = await chrome.tabs.query({ url: SUPPORTED_DOC_PATTERNS });
+    for (const t of tabs) {
+      if (t && t.id) {
+        ensureContentScriptInTab(t.id);
+      }
+    }
+  } catch (_) {}
 }
 
 function broadcastToExtension(payload) {
@@ -231,7 +297,7 @@ function rebuildContextMenus() {
   rebuildTimer = setTimeout(() => {
     chrome.contextMenus.removeAll(() => {
       const contexts = ["page", "link", "video", "image"];
-      const docPatterns = ["*://*.youtube.com/*"];
+      const docPatterns = SUPPORTED_DOC_PATTERNS;
 
       chrome.contextMenus.create({
         id: "u2b-root",
@@ -364,45 +430,66 @@ async function resolveTargetVideo(info, tab) {
   let url = "";
   let title = "";
 
-  if (info.linkUrl && isYouTubeWatchOrPlaylist(info.linkUrl)) {
+  if (info.linkUrl && isSupportedMediaUrl(info.linkUrl)) {
     url = info.linkUrl;
   }
 
   if (tab && tab.id) {
-    try {
-      const ctx = await chrome.tabs.sendMessage(tab.id, { type: "get_context_target" });
-      if (ctx) {
-        if (!url && ctx.url && isYouTubeWatchOrPlaylist(ctx.url)) {
-          url = ctx.url;
-        }
-        if (ctx.title) {
-          title = ctx.title;
-        }
+    const ctx = await sendToTabWithAutoInject(tab.id, { type: "get_context_target" });
+    if (ctx) {
+      if (!url && ctx.url && isSupportedMediaUrl(ctx.url)) {
+        url = ctx.url;
       }
-    } catch (_) {}
+      if (ctx.title) {
+        title = ctx.title;
+      }
+    }
   }
 
-  if (!url && info.pageUrl && isYouTubeWatchOrPlaylist(info.pageUrl)) {
+  if (!url && info.pageUrl && isSupportedMediaUrl(info.pageUrl)) {
     url = info.pageUrl;
   }
-  if (!url && tab && tab.url && isYouTubeWatchOrPlaylist(tab.url)) {
+  if (!url && tab && tab.url && isSupportedMediaUrl(tab.url)) {
     url = tab.url;
   }
   if (!title && tab && tab.title) {
-    title = tab.title.replace(/\s*-\s*YouTube$/i, "").trim();
+    title = tab.title
+      .replace(/\s*-\s*YouTube$/i, "")
+      .replace(/_哔哩哔哩_bilibili$/i, "")
+      .replace(/\s*-\s*抖音$/i, "")
+      .trim();
   }
 
   return { url, title };
 }
 
-function isYouTubeWatchOrPlaylist(u) {
-  if (!u) return false;
-  return (
-    u.includes("youtube.com/watch") ||
-    u.includes("youtube.com/shorts/") ||
-    u.includes("youtube.com/playlist") ||
-    u.includes("youtu.be/")
-  );
+function isSupportedMediaPage(u) {
+  if (!u || !/^https?:\/\//i.test(u)) return false;
+  try {
+    const host = new URL(u).hostname.toLowerCase();
+    const roots = [
+      "youtube.com", "youtu.be",
+      "bilibili.com", "b23.tv",
+      "douyin.com", "kuaishou.com", "xiaohongshu.com", "weibo.com", "ixigua.com",
+      "x.com", "twitter.com", "tiktok.com", "instagram.com", "twitch.tv", "vimeo.com"
+    ];
+    return roots.some((d) => host === d || host.endsWith("." + d));
+  } catch (_) {
+    return false;
+  }
+}
+
+function isSupportedMediaUrl(u) {
+  if (!isSupportedMediaPage(u)) return false;
+  if (u.includes("youtube.com/") || u.includes("youtu.be/")) {
+    return (
+      u.includes("youtube.com/watch") ||
+      u.includes("youtube.com/shorts/") ||
+      u.includes("youtube.com/playlist") ||
+      u.includes("youtu.be/")
+    );
+  }
+  return true;
 }
 
 async function getYouTubeCookiesNetscape() {
@@ -770,13 +857,17 @@ chrome.runtime.onInstalled.addListener(() => {
       res.u2bTasks.forEach((t) => activeTasks.set(t.id, t));
     }
     rebuildContextMenus();
+    injectContentIntoOpenTabs();
     sendNative({ type: "get_config" });
   });
 });
 
-chrome.storage.local.get(["u2bConfig"], (res) => {
+chrome.storage.local.get(["u2bConfig", "u2bTasks"], (res) => {
   if (res.u2bConfig) {
     appConfig = { ...appConfig, ...res.u2bConfig };
+  }
+  if (Array.isArray(res.u2bTasks)) {
+    res.u2bTasks.forEach((t) => activeTasks.set(t.id, t));
   }
   rebuildContextMenus();
   getYouTubeCookiesNetscape().then((cookies) => {

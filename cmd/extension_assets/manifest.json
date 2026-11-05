@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "u2b YouTube Downloader",
-  "version": "1.0.0",
-  "description": "右键一键调用本地 u2b 下载 YouTube 视频或 MP3 到指定目录，支持实时进度显示与 Finder 定位。",
+  "name": "u2b YouTube & Video Downloader",
+  "version": "1.0.8",
+  "description": "右键一键调用本地 u2b 下载 YouTube、B站、抖音、小红书、TikTok、X 视频或 MP3，支持页内实时进度卡片与 Finder 定位。",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvJkpAx0Cx514wS1Zd64jvqo+h1cZ5RZNodl0UOyDQjFTuFSUOqvixD4sJY52munlOkyfiOymvbQ7joXF/WHig1N0ElxU9odOtEaYu9XrNnmrF+IB/flNvkE2XKRFGdcT9l7JPOIjU7ttFj0b0Qxcuctit78SUUcH3STGNyaqDXNc6Q6RICJ+c9qaCfMwnjqxH9uWkA0VA7N/D1DlbR4YLzVRKB+CWGYIfZwuieaS6pYJO8Z4ZxKhGp5yMaGHYYFmtgptXt+2/6Ih9LznhM+KYMKZpeog1JqHAlGmSqmxw0xwcZ9TiSUbfSjRdDgkqSZK6/7SDdwrb03MKuhlpxO2nQIDAQAB",
   "permissions": [
     "contextMenus",
@@ -11,11 +11,24 @@
     "notifications",
     "activeTab",
     "tabs",
+    "scripting",
     "cookies"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",
-    "*://youtu.be/*"
+    "*://youtu.be/*",
+    "*://*.bilibili.com/*",
+    "*://*.douyin.com/*",
+    "*://*.kuaishou.com/*",
+    "*://*.xiaohongshu.com/*",
+    "*://*.weibo.com/*",
+    "*://*.ixigua.com/*",
+    "*://*.x.com/*",
+    "*://*.twitter.com/*",
+    "*://*.tiktok.com/*",
+    "*://*.instagram.com/*",
+    "*://*.twitch.tv/*",
+    "*://*.vimeo.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -37,7 +50,19 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.youtube.com/*"
+        "*://*.youtube.com/*",
+        "*://*.bilibili.com/*",
+        "*://*.douyin.com/*",
+        "*://*.kuaishou.com/*",
+        "*://*.xiaohongshu.com/*",
+        "*://*.weibo.com/*",
+        "*://*.ixigua.com/*",
+        "*://*.x.com/*",
+        "*://*.twitter.com/*",
+        "*://*.tiktok.com/*",
+        "*://*.instagram.com/*",
+        "*://*.twitch.tv/*",
+        "*://*.vimeo.com/*"
       ],
       "css": [
         "content.css"

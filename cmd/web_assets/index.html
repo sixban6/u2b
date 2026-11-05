@@ -950,8 +950,13 @@
         }
       }
 
+      let activeSSE = null;
       function connectSSE() {
+        if (activeSSE) {
+          try { activeSSE.close(); } catch (_) {}
+        }
         const es = new EventSource(apiUrl("/api/events"));
+        activeSSE = es;
         es.onopen = () => {
           el("conn-pill").classList.remove("offline");
           el("conn-text").textContent = "已连接";
@@ -995,12 +1000,12 @@
       }
 
       loadState().then(() => {
+        connectSSE();
         if (incomingUrl && (quickFmt === "mp4" || quickFmt === "mp3")) {
           setFormat(quickFmt);
           submitDownload(params.get("phone") === "1");
         }
       });
-      connectSSE();
     })();
   </script>
 </body>

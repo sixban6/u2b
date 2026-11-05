@@ -1,8 +1,13 @@
 (() => {
+  if (window.__u2bContentScriptLoaded) {
+    return;
+  }
+  window.__u2bContentScriptLoaded = true;
+
   let lastRightClickTarget = { url: "", title: "" };
   const toastElements = new Map();
 
-  // Capture right-click context on YouTube cards, thumbnails, or player
+  // Capture right-click context on YouTube, Bilibili, TikTok, Douyin, Xiaohongshu, X cards or player
   document.addEventListener(
     "contextmenu",
     (e) => {
@@ -12,26 +17,29 @@
         return;
       }
 
-      // 1. Check closest anchor with watch/shorts/playlist href
-      const link = target.closest('a[href*="/watch"], a[href*="/shorts/"], a[href*="/playlist"]');
+      const link = target.closest(
+        'a[href*="/watch"], a[href*="/shorts/"], a[href*="/playlist"], a[href*="/video/BV"], a[href*="/bangumi/play/"], a[href*="/video/"], a[href*="/status/"], a[href*="/explore/"]'
+      );
       const card = target.closest(
-        "ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer, ytd-reel-item-renderer, ytm-shorts-lockup-view-model"
+        "ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer, ytd-reel-item-renderer, ytm-shorts-lockup-view-model, .bili-video-card, .feed-card, .video-page-card-small"
       );
 
       let url = "";
       let title = "";
 
       if (link && link.href) {
-        url = normalizeYouTubeUrl(link.href);
+        url = normalizeVideoUrl(link.href);
       } else if (card) {
-        const cardLink = card.querySelector('a#thumbnail[href], a#video-title-link[href], a#video-title[href], a[href*="/watch"], a[href*="/shorts/"]');
+        const cardLink = card.querySelector(
+          'a#thumbnail[href], a#video-title-link[href], a#video-title[href], a[href*="/watch"], a[href*="/shorts/"], a[href*="/video/BV"], a[href*="/video/"]'
+        );
         if (cardLink && cardLink.href) {
-          url = normalizeYouTubeUrl(cardLink.href);
+          url = normalizeVideoUrl(cardLink.href);
         }
       }
 
       if (card) {
-        const titleEl = card.querySelector("#video-title, #video-title-link, h3 a, span#video-title");
+        const titleEl = card.querySelector("#video-title, #video-title-link, .bili-video-card__info--tit, h3 a, span#video-title");
         if (titleEl) {
           title = (titleEl.getAttribute("title") || titleEl.textContent || "").trim();
         }
@@ -50,14 +58,21 @@
     true
   );
 
-  function normalizeYouTubeUrl(raw) {
+  function normalizeVideoUrl(raw) {
     try {
       const u = new URL(raw, window.location.origin);
-      if (u.pathname === "/watch" && u.searchParams.get("v")) {
+      if (u.hostname.includes("youtube.com") && u.pathname === "/watch" && u.searchParams.get("v")) {
         const clean = new URL("https://www.youtube.com/watch");
         clean.searchParams.set("v", u.searchParams.get("v"));
         if (u.searchParams.get("list")) {
           clean.searchParams.set("list", u.searchParams.get("list"));
+        }
+        return clean.toString();
+      }
+      if (u.hostname.includes("bilibili.com") && u.pathname.startsWith("/video/")) {
+        const clean = new URL(u.origin + u.pathname);
+        if (u.searchParams.get("p")) {
+          clean.searchParams.set("p", u.searchParams.get("p"));
         }
         return clean.toString();
       }
@@ -70,32 +85,43 @@
   function getCurrentPageVideoInfo() {
     const href = window.location.href;
     let title = "";
-    const h1 = document.querySelector("ytd-watch-metadata h1 yt-formatted-string, #title h1 yt-formatted-string");
+    const h1 = document.querySelector(
+      "ytd-watch-metadata h1 yt-formatted-string, #title h1 yt-formatted-string, h1.video-title"
+    );
     if (h1 && h1.textContent) {
       title = h1.textContent.trim();
     } else {
-      title = document.title.replace(/^\(\d+\)\s*/, "").replace(/\s*-\s*YouTube$/i, "").trim();
+      title = document.title
+        .replace(/^\(\d+\)\s*/, "")
+        .replace(/\s*-\s*YouTube$/i, "")
+        .replace(/_哔哩哔哩_bilibili$/i, "")
+        .replace(/\s*-\s*抖音$/i, "")
+        .trim();
     }
     return {
-      url: isYouTubeMediaUrl(href) ? normalizeYouTubeUrl(href) : "",
+      url: isSupportedMediaUrl(href) ? normalizeVideoUrl(href) : "",
       title
     };
   }
 
-  function isYouTubeMediaUrl(u) {
-    return (
-      u.includes("youtube.com/watch") ||
-      u.includes("youtube.com/shorts/") ||
-      u.includes("youtube.com/playlist")
-    );
+  function isSupportedMediaUrl(u) {
+    if (!u || !/^https?:\/\//i.test(u)) return false;
+    if (u.includes("youtube.com/")) {
+      return (
+        u.includes("youtube.com/watch") ||
+        u.includes("youtube.com/shorts/") ||
+        u.includes("youtube.com/playlist")
+      );
+    }
+    return true;
   }
 
   function ensureToastContainer() {
     let container = document.getElementById("u2b-toast-container");
-    if (!container) {
+    if (!container || !document.documentElement.contains(container)) {
       container = document.createElement("div");
       container.id = "u2b-toast-container";
-      document.body.appendChild(container);
+      (document.body || document.documentElement).appendChild(container);
     }
     return container;
   }
@@ -477,12 +503,14 @@
 
     if (msg.type === "task_update") {
       renderTaskToast(msg.task);
-      return;
+      sendResponse({ ok: true });
+      return true;
     }
 
     if (msg.type === "open_custom_dialog") {
       openCustomDownloadDialog(msg);
-      return;
+      sendResponse({ ok: true });
+      return true;
     }
 
     if (msg.type === "show_alert") {
@@ -492,6 +520,21 @@
         status: "error",
         error: msg.message
       });
+      sendResponse({ ok: true });
+      return true;
     }
   });
+
+  // Restore any currently active running task toast if page was reloaded mid-download
+  try {
+    chrome.runtime.sendMessage({ type: "get_state" }, (res) => {
+      if (chrome.runtime.lastError || !res || !Array.isArray(res.tasks)) return;
+      const now = Date.now();
+      res.tasks.forEach((t) => {
+        if ((t.status === "starting" || t.status === "downloading") && now - (t.updatedAt || 0) < 600000) {
+          renderTaskToast(t);
+        }
+      });
+    });
+  } catch (_) {}
 })();
