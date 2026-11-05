@@ -3,7 +3,9 @@ package test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -11,7 +13,30 @@ import (
 	"github.com/sixban6/u2b/downloader"
 )
 
+func ensureTestYtdlpPath(t *testing.T) string {
+	t.Helper()
+	if p, err := exec.LookPath("yt-dlp"); err == nil && p != "" {
+		return p
+	}
+	dir := t.TempDir()
+	binName := "yt-dlp"
+	if runtime.GOOS == "windows" {
+		binName = "yt-dlp.exe"
+	}
+	stubSrc := filepath.Join(dir, "main.go")
+	stubBin := filepath.Join(dir, binName)
+	src := "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"2026.08.19\") }\n"
+	if err := os.WriteFile(stubSrc, []byte(src), 0644); err != nil {
+		t.Fatalf("failed to write stub yt-dlp source: %v", err)
+	}
+	if out, err := exec.Command("go", "build", "-o", stubBin, stubSrc).CombinedOutput(); err != nil {
+		t.Fatalf("failed to build stub yt-dlp binary: %v (%s)", err, string(out))
+	}
+	return stubBin
+}
+
 func TestNewYouTubeDownloader(t *testing.T) {
+	ytdlpBin := ensureTestYtdlpPath(t)
 	tests := []struct {
 		name        string
 		config      *config.Config
@@ -35,6 +60,7 @@ func TestNewYouTubeDownloader(t *testing.T) {
 				Advanced: config.AdvancedConfig{
 					RetryCount: 3,
 					Timeout:    30 * time.Minute,
+					YtdlpPath:  ytdlpBin,
 				},
 				YouTube: config.YouTubeConfig{
 					Client: config.ClientWebCreator,
@@ -61,6 +87,7 @@ func TestNewYouTubeDownloader(t *testing.T) {
 				Advanced: config.AdvancedConfig{
 					RetryCount: 3,
 					Timeout:    30 * time.Minute,
+					YtdlpPath:  ytdlpBin,
 				},
 				YouTube: config.YouTubeConfig{
 					Client: config.ClientWebCreator,

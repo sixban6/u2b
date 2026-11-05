@@ -299,6 +299,9 @@ youtube:
 	}
 
 	// Test creating downloader with loaded config
+	if cfg.Advanced.YtdlpPath == "" {
+		cfg.Advanced.YtdlpPath = ensureTestYtdlpPath(t)
+	}
 	d, err := downloader.NewYouTubeDownloader(cfg)
 	if err != nil {
 		t.Fatalf("failed to create downloader with loaded config: %v", err)
