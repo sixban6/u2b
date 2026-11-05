@@ -183,6 +183,13 @@ func validateConfig(cfg *Config) error {
 func processConfigPaths(cfg *Config) error {
 	var err error
 
+	if cfg.Quality.Preferred != "" {
+		cfg.Quality.Preferred = NormalizeQuality(cfg.Quality.Preferred)
+	}
+	if cfg.Quality.Fallback != "" {
+		cfg.Quality.Fallback = NormalizeQuality(cfg.Quality.Fallback)
+	}
+
 	cfg.Download.OutputDir, err = expandPath(cfg.Download.OutputDir)
 	if err != nil {
 		return fmt.Errorf("error expanding output_dir: %w", err)

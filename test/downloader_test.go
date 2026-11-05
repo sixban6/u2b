@@ -364,6 +364,30 @@ func TestParseQuality(t *testing.T) {
 			expectError:    false,
 		},
 		{
+			name:           "human alias 4k",
+			input:          "4K",
+			expectedOutput: "2160",
+			expectError:    false,
+		},
+		{
+			name:           "human alias 2k",
+			input:          "2k",
+			expectedOutput: "1440",
+			expectError:    false,
+		},
+		{
+			name:           "human alias 1080p",
+			input:          "1080p",
+			expectedOutput: "1080",
+			expectError:    false,
+		},
+		{
+			name:           "human alias auto",
+			input:          "auto",
+			expectedOutput: config.QualityBest,
+			expectError:    false,
+		},
+		{
 			name:           "numeric quality",
 			input:          "720",
 			expectedOutput: "720",

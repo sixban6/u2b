@@ -51,8 +51,11 @@ func TestBuildDownloadArgsVideoMode(t *testing.T) {
 		OutputTemplate: "%(title)s.%(ext)s",
 	})
 
-	if !hasArgPair(args, "--format", "bestvideo[height<=720]+bestaudio/best[height<=720]/best") {
-		t.Fatalf("expected video mode to use DASH video+audio quality selector, args: %v", args)
+	if !hasArgPair(args, "--format", "bestvideo[height<=720]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best") {
+		t.Fatalf("expected video mode to use Apple-compatible m4a-preferred DASH selector, args: %v", args)
+	}
+	if !hasArgPair(args, "--format-sort", "res,fps,vcodec:h264,aext:m4a") {
+		t.Fatalf("expected video mode to include --format-sort, args: %v", args)
 	}
 	if !hasArgPair(args, "--merge-output-format", "mp4") {
 		t.Fatalf("expected video mode to set --merge-output-format mp4, args: %v", args)
@@ -62,6 +65,17 @@ func TestBuildDownloadArgsVideoMode(t *testing.T) {
 	}
 	if hasArg(args, "--audio-format") {
 		t.Fatalf("did not expect --audio-format in video mode, args: %v", args)
+	}
+
+	// Verify human-friendly "4k" alias maps to height<=2160
+	args4k := y.BuildDownloadArgs(&downloader.YtdlpOptions{
+		URL:            "https://example.com/watch?v=abc123",
+		Quality:        "4k",
+		OutputDir:      "/tmp",
+		OutputTemplate: "%(title)s.%(ext)s",
+	})
+	if !hasArgPair(args4k, "--format", "bestvideo[height<=2160]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]/best") {
+		t.Fatalf("expected '4k' alias to map to height<=2160 selector, args: %v", args4k)
 	}
 }
 

@@ -20,6 +20,51 @@ tabDirs.onclick = () => {
   panelTasks.classList.add("hidden");
 };
 
+function formatQualityLabel(q) {
+  switch ((q || "hd1080").toLowerCase()) {
+    case "best":
+      return "原画最高";
+    case "hd2160":
+    case "4k":
+    case "2160":
+      return "原画 4K";
+    case "hd1440":
+    case "2k":
+    case "1440":
+      return "2K";
+    case "hd720":
+    case "720":
+      return "720p";
+    case "sd480":
+    case "480":
+      return "480p";
+    default:
+      return "1080p";
+  }
+}
+
+function renderQualityBar() {
+  const activeQ = (currentConfig && currentConfig.defaultQuality) || "hd1080";
+  const normalizedBtnQ = activeQ === "best" ? "hd2160" : activeQ;
+  document.querySelectorAll("#popup-quality-pills .q-pill").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.q === normalizedBtnQ);
+  });
+  const dlVideoBtn = document.getElementById("btn-dl-video");
+  if (dlVideoBtn) {
+    dlVideoBtn.textContent = `⚡ 下载当前页视频 (${formatQualityLabel(activeQ)})`;
+  }
+}
+
+document.querySelectorAll("#popup-quality-pills .q-pill").forEach((btn) => {
+  btn.onclick = () => {
+    const q = btn.dataset.q;
+    if (!currentConfig) currentConfig = {};
+    currentConfig.defaultQuality = q;
+    renderQualityBar();
+    chrome.runtime.sendMessage({ type: "set_default_quality", quality: q });
+  };
+});
+
 function renderTasks() {
   const container = document.getElementById("tasks-container");
   if (!currentTasks || currentTasks.length === 0) {
@@ -35,10 +80,11 @@ function renderTasks() {
       else if (t.status === "error") statusLabel = "⚠️ 失败";
       else if (pct > 0) statusLabel = `${pct.toFixed(1)}% · ${t.speed || ""}`;
 
+      const typeTag = t.format === "mp3" ? "🎵 MP3" : `🎬 视频 ${formatQualityLabel(t.quality)}`;
       return `
         <div class="task-card">
           <div class="task-top">
-            <span>${t.format === "mp3" ? "🎵 MP3" : "🎬 视频"} · ${escapeHtml(statusLabel)}</span>
+            <span>${escapeHtml(typeTag)} · ${escapeHtml(statusLabel)}</span>
             ${
               t.status === "completed"
                 ? `<button class="link-btn" data-reveal="${escapeHtml(t.filePath || t.outputDir)}">📂 Finder</button>`
@@ -193,12 +239,13 @@ async function triggerActiveTabDownload(format) {
     format === "mp3"
       ? (currentConfig && currentConfig.defaultAudioDir) || ""
       : (currentConfig && currentConfig.defaultVideoDir) || "";
+  const quality = (currentConfig && currentConfig.defaultQuality) || "hd1080";
   chrome.runtime.sendMessage({
     type: "start_download",
     url: tab.url,
     title: (tab.title || "").replace(/\s*-\s*YouTube$/i, "").trim(),
     format,
-    quality: "hd1080",
+    quality,
     outputDir,
     tabId: tab.id
   });
@@ -219,6 +266,7 @@ chrome.runtime.sendMessage({ type: "get_state" }, (res) => {
   if (res) {
     currentConfig = res.config;
     currentTasks = res.tasks || [];
+    renderQualityBar();
     renderTasks();
     renderDirs();
   }
@@ -233,6 +281,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     renderTasks();
   } else if (msg.type === "config_updated" && msg.config) {
     currentConfig = msg.config;
+    renderQualityBar();
     renderDirs();
   }
 });

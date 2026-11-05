@@ -21,13 +21,16 @@ func (q *DefaultQualitySelector) SelectBestQuality(available []string, preferred
 	if len(available) == 0 {
 		return "", fmt.Errorf("no qualities available")
 	}
-	
+
+	preferred = config.NormalizeQuality(preferred)
+	fallback = config.NormalizeQuality(fallback)
+
 	// Parse preferred quality
 	preferredHeight, err := q.ParseQuality(preferred)
 	if err != nil {
 		return "", fmt.Errorf("invalid preferred quality: %w", err)
 	}
-	
+
 	// Parse fallback quality
 	fallbackHeight, err := q.ParseQuality(fallback)
 	if err != nil {
@@ -91,49 +94,20 @@ func (q *DefaultQualitySelector) SelectBestQuality(available []string, preferred
 
 // ParseQuality parses and validates quality string
 func (q *DefaultQualitySelector) ParseQuality(quality string) (string, error) {
-	if quality == "" {
+	norm := config.NormalizeQuality(quality)
+	if norm == "" {
 		return "", fmt.Errorf("quality cannot be empty")
 	}
-	
+
 	// Handle special qualities
-	if quality == config.QualityBest || quality == config.QualityWorst {
-		return quality, nil
+	if norm == config.QualityBest || norm == config.QualityWorst {
+		return norm, nil
 	}
-	
-	// Handle standard qualities
-	qualityMap := map[string]string{
-		config.Quality2160p: "2160",
-		config.Quality1440p: "1440", 
-		config.Quality1080p: "1080",
-		config.Quality720p:  "720",
-		config.Quality480p:  "480",
-		config.Quality360p:  "360",
-		config.Quality240p:  "240",
-	}
-	
-	if height, exists := qualityMap[quality]; exists {
+
+	if height, ok := config.QualityToHeight(norm); ok {
 		return height, nil
 	}
-	
-	// Handle numeric qualities (e.g., "1080", "720")
-	if height, err := strconv.Atoi(quality); err == nil {
-		if height >= 240 && height <= 2160 {
-			return quality, nil
-		}
-	}
-	
-	// Handle resolution format (e.g., "1920x1080")
-	if strings.Contains(quality, "x") {
-		parts := strings.Split(quality, "x")
-		if len(parts) == 2 {
-			if height, err := strconv.Atoi(parts[1]); err == nil {
-				if height >= 240 && height <= 2160 {
-					return parts[1], nil
-				}
-			}
-		}
-	}
-	
+
 	return "", fmt.Errorf("unsupported quality format: %s", quality)
 }
 

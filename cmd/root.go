@@ -67,13 +67,15 @@ var downloadCmd = &cobra.Command{
 	Long: `Download video from the specified URL. Supports YouTube membership videos
 when properly configured with authentication.
 
-The quality parameter accepts the following values:
-  - hd2160, hd1440, hd1080, hd720, sd480, sd360, sd240
-  - best, worst
-  - Custom heights like 1080, 720, etc.
+The quality parameter accepts intuitive values:
+  - 4k / 2160p / hd2160
+  - 2k / 1440p / hd1440
+  - 1080p / hd1080 (default)
+  - 720p / hd720, 480p / sd480, 360p / sd360
+  - best (auto highest), worst
 
 Examples:
-  u2b -q hd1080 "https://www.youtube.com/watch?v=VIDEO_ID"
+  u2b -q 4k "https://www.youtube.com/watch?v=VIDEO_ID"
   u2b -m -o ./downloads -n "Star Sky" "URL"
   u2b download --quality best --output-dir ./downloads "URL"`,
 	Args: cobra.ExactArgs(1),
@@ -151,7 +153,7 @@ func Execute() {
 }
 
 func registerDownloadFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
+	cmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (4k, 2k, 1080p, 720p, 480p, best)")
 	cmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
 	cmd.Flags().StringVarP(&fileName, "filename", "n", "", "set output file name (without extension)")
 	cmd.Flags().StringVarP(&format, "format", "f", "", "output format (mp3 for audio-only download)")
@@ -175,7 +177,7 @@ func init() {
 	registerDownloadFlags(downloadCmd)
 
 	// Download series command flags
-	downloadSeriesCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (hd1080, hd720, best, etc.)")
+	downloadSeriesCmd.Flags().StringVarP(&quality, "quality", "q", "", "video quality (4k, 2k, 1080p, 720p, 480p, best)")
 	downloadSeriesCmd.Flags().StringVarP(&format, "format", "f", "", "output format (mp3 for audio-only download)")
 	downloadSeriesCmd.Flags().BoolVarP(&mp3Only, "mp3", "m", false, "shortcut for --format mp3 (audio-only download)")
 	downloadSeriesCmd.Flags().StringVarP(&outputDir, "output-dir", "o", "", "output directory")
@@ -275,7 +277,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 
 	// Override quality if specified
 	if quality != "" {
-		options.Quality = quality
+		options.Quality = config.NormalizeQuality(quality)
 	}
 	if fileName != "" {
 		customTemplate, err := BuildOutputTemplateForFilename(fileName)
@@ -409,7 +411,7 @@ func runDownloadSeries(cmd *cobra.Command, args []string) error {
 
 	// Override quality if specified
 	if quality != "" {
-		options.Quality = quality
+		options.Quality = config.NormalizeQuality(quality)
 	}
 
 	// Set up progress callback if verbose
@@ -497,26 +499,26 @@ func downloadPlaylistDirect(ctx context.Context, cfg *config.Config, url, output
 			args = append(args, "--audio-quality", audioQuality)
 		}
 	} else if options.Quality != "" {
-		height := options.Quality
-		if height == "hd2160" || height == config.Quality2160p {
-			height = "2160"
-		} else if height == "hd1440" || height == config.Quality1440p {
-			height = "1440"
-		} else if height == "hd1080" || height == config.Quality1080p {
-			height = "1080"
-		} else if height == "hd720" || height == config.Quality720p {
-			height = "720"
-		} else if height == "sd480" || height == config.Quality480p {
-			height = "480"
-		} else if height == "sd360" || height == config.Quality360p {
-			height = "360"
-		} else if height == "sd240" || height == config.Quality240p {
-			height = "240"
+		normQ := config.NormalizeQuality(options.Quality)
+		if normQ == config.QualityBest {
+			args = append(args,
+				"--format", "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+				"--format-sort", "res,fps,vcodec:h264,aext:m4a",
+				"--merge-output-format", "mp4",
+			)
+		} else if normQ == config.QualityWorst {
+			args = append(args, "--format", "worstvideo+worstaudio/worst")
+		} else {
+			height, ok := config.QualityToHeight(normQ)
+			if !ok {
+				height = normQ
+			}
+			args = append(args,
+				"--format", fmt.Sprintf("bestvideo[height<=%s]+bestaudio[ext=m4a]/bestvideo[height<=%s]+bestaudio/best[height<=%s]/best", height, height, height),
+				"--format-sort", "res,fps,vcodec:h264,aext:m4a",
+				"--merge-output-format", "mp4",
+			)
 		}
-		args = append(args,
-			"--format", fmt.Sprintf("bestvideo[height<=%s]+bestaudio/best[height<=%s]/best", height, height),
-			"--merge-output-format", "mp4",
-		)
 	}
 
 	args = append(args, url)

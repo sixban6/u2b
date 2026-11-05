@@ -34,8 +34,8 @@ irm https://raw.githubusercontent.com/sixban6/u2b/main/install.ps1 | iex
 安装完成后会自动打开引导页与插件文件夹（支持 **Brave / Chrome / Edge**）：
 1. 按页面提示把已高亮的 `extension` 文件夹拖入浏览器扩展页，即可完成首次启用；
 2. 之后打开 YouTube，在**任意视频封面、标题或播放页直接点击鼠标右键**：
-   - 一键下载高清视频（MP4）或仅提取音频（MP3）
-   - 直接选择保存的分类文件夹，或一键下载整个播放列表
+   - 一键下载高清视频（默认 1080p，可在右上角插件面板一键切换为 **原画 4K**）或仅提取音频（MP3）
+   - 直接选择保存的分类文件夹、单次自定义文件名与画质，或一键下载整个播放列表
 
 > 如果后续新装了浏览器，随时在终端运行 `u2b ext` 即可重新打开挂载引导。
 
@@ -61,8 +61,9 @@ u2b serve install
 喜欢用命令行的用户，直接输入 `u2b + 链接` 即可开箱使用：
 
 ```bash
-# 1. 直接下载高清视频（默认优选 1080p）
+# 1. 直接下载视频（默认 1080p 高清；需要 4K 原画可加 -q 4k）
 u2b "https://www.youtube.com/watch?v=VIDEO_ID"
+u2b -q 4k "https://www.youtube.com/watch?v=VIDEO_ID"
 
 # 2. 仅提取 MP3 音频（加 -m）
 u2b -m "https://www.youtube.com/watch?v=VIDEO_ID"

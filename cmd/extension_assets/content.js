@@ -109,6 +109,29 @@
     return `${mb.toFixed(1)} MB`;
   }
 
+  function formatQualityLabel(q) {
+    switch ((q || "hd1080").toLowerCase()) {
+      case "best":
+        return "原画最高";
+      case "hd2160":
+      case "4k":
+      case "2160":
+        return "原画 4K";
+      case "hd1440":
+      case "2k":
+      case "1440":
+        return "2K";
+      case "hd720":
+      case "720":
+        return "720p";
+      case "sd480":
+      case "480":
+        return "480p";
+      default:
+        return "1080p";
+    }
+  }
+
   function renderTaskToast(task) {
     if (!task || !task.id) return;
     const container = ensureToastContainer();
@@ -122,7 +145,7 @@
     }
 
     const isMP3 = task.format === "mp3";
-    const badgeText = isMP3 ? "MP3 音频" : (task.quality || "1080p");
+    const badgeText = isMP3 ? "MP3 音频" : formatQualityLabel(task.quality);
     const folderName = task.outputDir ? task.outputDir.split("/").filter(Boolean).slice(-2).join("/") : "默认目录";
     const pct = Math.min(100, Math.max(0, Number(task.percentage || 0)));
 
@@ -223,6 +246,8 @@
     backdrop.id = "u2b-modal-backdrop";
 
     let selectedFormat = "mp4";
+    let selectedQuality = (config && config.defaultQuality) || "hd1080";
+    if (selectedQuality === "best") selectedQuality = "hd2160";
     const getDirsForFormat = (fmt) =>
       fmt === "mp3" ? (config.audioDirs || []) : (config.videoDirs || []);
     const getDefaultDir = (fmt) =>
@@ -238,8 +263,18 @@
         <div class="u2b-form-group">
           <label>下载格式</label>
           <div class="u2b-seg-control">
-            <button type="button" class="u2b-seg-btn active" data-fmt="mp4">🎬 视频 (1080p MP4)</button>
+            <button type="button" class="u2b-seg-btn active" data-fmt="mp4">🎬 视频 (MP4)</button>
             <button type="button" class="u2b-seg-btn" data-fmt="mp3">🎵 仅音频 (MP3)</button>
+          </div>
+        </div>
+
+        <div class="u2b-form-group" id="u2b-quality-group">
+          <label>视频画质（源视频不足所选档位时自动下载最高可用画质）</label>
+          <div class="u2b-dir-chips" id="u2b-quality-chips">
+            <button type="button" class="u2b-chip" data-q="hd2160">原画 4K</button>
+            <button type="button" class="u2b-chip" data-q="hd1080">1080p 高清</button>
+            <button type="button" class="u2b-chip" data-q="hd720">720p 均衡</button>
+            <button type="button" class="u2b-chip" data-q="sd480">480p 省流</button>
           </div>
         </div>
 
@@ -345,11 +380,24 @@
 
     renderChips();
 
+    const qualityGroup = backdrop.querySelector("#u2b-quality-group");
+    function renderQualityChips() {
+      backdrop.querySelectorAll("#u2b-quality-chips .u2b-chip").forEach((chip) => {
+        chip.classList.toggle("active", chip.getAttribute("data-q") === selectedQuality);
+        chip.onclick = () => {
+          selectedQuality = chip.getAttribute("data-q");
+          renderQualityChips();
+        };
+      });
+    }
+    renderQualityChips();
+
     backdrop.querySelectorAll(".u2b-seg-btn").forEach((btn) => {
       btn.onclick = () => {
         backdrop.querySelectorAll(".u2b-seg-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         selectedFormat = btn.getAttribute("data-fmt");
+        qualityGroup.style.display = selectedFormat === "mp3" ? "none" : "";
         dirInput.value = getDefaultDir(selectedFormat);
         renderChips();
       };
@@ -376,7 +424,7 @@
         url,
         title: filename || title,
         format: selectedFormat,
-        quality: "hd1080",
+        quality: selectedQuality,
         outputDir,
         filename
       });

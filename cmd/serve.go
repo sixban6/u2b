@@ -360,6 +360,7 @@ func (s *U2BServer) Handler() http.Handler {
 
 	// Protected API endpoints
 	mux.HandleFunc("/api/config", s.withAuth(s.handleAPIConfig))
+	mux.HandleFunc("/api/quality", s.withAuth(s.handleAPIQuality))
 	mux.HandleFunc("/api/categories", s.withAuth(s.handleAPICategories))
 	mux.HandleFunc("/api/cookies", s.withAuth(s.handleAPICookies))
 	mux.HandleFunc("/api/tasks", s.withAuth(s.handleAPITasks))
@@ -505,6 +506,7 @@ func (s *U2BServer) buildConfigPayload() map[string]any {
 		"audioRootDir":    presets.AudioRootDir,
 		"defaultVideoDir": presets.DefaultVideoDir,
 		"defaultAudioDir": presets.DefaultAudioDir,
+		"defaultQuality":  presets.DefaultQuality,
 		"videoDirs":       presets.VideoDirs,
 		"audioDirs":       presets.AudioDirs,
 		"addresses":       DiscoverServerAddresses(s.port),
@@ -515,6 +517,35 @@ func (s *U2BServer) buildConfigPayload() map[string]any {
 
 func (s *U2BServer) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.buildConfigPayload())
+}
+
+func (s *U2BServer) handleAPIQuality(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	var req struct {
+		Quality string `json:"quality"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+		return
+	}
+	normQ := config.NormalizeQuality(req.Quality)
+	if normQ == "" {
+		normQ = config.Quality1080p
+	}
+	presets := loadRawExtensionPresets()
+	presets.DefaultQuality = normQ
+	_ = saveExtensionPresets(presets)
+
+	cfgPayload := s.buildConfigPayload()
+	s.broadcastSSE("config_updated", cfgPayload)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"defaultQuality": normQ,
+		"config":         cfgPayload,
+	})
 }
 
 func (s *U2BServer) handleAPICategories(w http.ResponseWriter, r *http.Request) {
@@ -804,8 +835,17 @@ func (s *U2BServer) handleAPIQuick(w http.ResponseWriter, r *http.Request) {
 	} else {
 		format = "mp4"
 	}
+	if strings.TrimSpace(quality) == "" {
+		if waitMode {
+			// For direct iPhone local file download, keep 1080p for fast muxing and universal Apple hardware playback
+			quality = config.Quality1080p
+		} else {
+			quality = loadExtensionPresets().DefaultQuality
+		}
+	}
+	quality = config.NormalizeQuality(quality)
 	if quality == "" {
-		quality = "hd1080"
+		quality = config.Quality1080p
 	}
 
 	resolvedDir, dirLabel := resolveTargetOutputDir(format, outputDir, category)
@@ -813,7 +853,7 @@ func (s *U2BServer) handleAPIQuick(w http.ResponseWriter, r *http.Request) {
 	if !waitMode {
 		isPlaylist := strings.Contains(cleanURL, "youtube.com/playlist")
 		task := s.enqueueDownload(cleanURL, "", format, quality, resolvedDir, filename, isPlaylist)
-		modeDesc := "1080p 视频"
+		modeDesc := config.QualityDisplayLabel(quality) + " 视频"
 		if format == "mp3" {
 			modeDesc = "高音质 MP3"
 		}
@@ -975,8 +1015,12 @@ func (s *U2BServer) enqueueDownloadWithWait(parentCtx context.Context, urlStr, t
 	} else {
 		format = "mp4"
 	}
+	if strings.TrimSpace(quality) == "" {
+		quality = loadExtensionPresets().DefaultQuality
+	}
+	quality = config.NormalizeQuality(quality)
 	if quality == "" {
-		quality = "hd1080"
+		quality = config.Quality1080p
 	}
 	if title == "" {
 		title = urlStr

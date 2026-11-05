@@ -58,7 +58,48 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px;
+      margin-bottom: 10px;
+    }
+    .quality-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 9px;
+      padding: 6px 9px;
       margin-bottom: 14px;
+    }
+    .quality-label {
+      font-size: 11px;
+      color: #9ca3af;
+      white-space: nowrap;
+    }
+    .quality-pills {
+      display: flex;
+      gap: 4px;
+    }
+    .q-pill {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #9ca3af;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .q-pill:hover {
+      color: #e5e7eb;
+      border-color: rgba(255,255,255,0.28);
+    }
+    .q-pill.active {
+      background: rgba(37, 99, 235, 0.26);
+      border-color: #3b82f6;
+      color: #93c5fd;
+      font-weight: 600;
     }
     .q-btn {
       background: rgba(37, 99, 235, 0.18);
@@ -225,8 +266,17 @@
 
   <div class="panel" id="panel-tasks">
     <div class="quick-bar">
-      <button class="q-btn" id="btn-dl-video">⚡ 下载当前页视频</button>
+      <button class="q-btn" id="btn-dl-video">⚡ 下载当前页视频 (1080p)</button>
       <button class="q-btn mp3" id="btn-dl-mp3">🎵 下载当前页 MP3</button>
+    </div>
+    <div class="quality-row">
+      <span class="quality-label">默认视频画质</span>
+      <div class="quality-pills" id="popup-quality-pills">
+        <button type="button" class="q-pill" data-q="hd2160" title="最高下载 4K，源视频不足时自动匹配最高可用画质">原画 4K</button>
+        <button type="button" class="q-pill active" data-q="hd1080">1080p</button>
+        <button type="button" class="q-pill" data-q="hd720">720p</button>
+        <button type="button" class="q-pill" data-q="sd480">480p</button>
+      </div>
     </div>
     <div class="section-title">最近下载任务</div>
     <div id="tasks-container"></div>

@@ -640,33 +640,23 @@ func (y *YtdlpExecutor) BuildDownloadArgs(options *YtdlpOptions) []string {
 			args = append(args, "--audio-quality", audioQuality)
 		}
 	} else if options.Quality != "" {
-		if options.Quality == config.QualityBest {
+		normQ := config.NormalizeQuality(options.Quality)
+		if normQ == config.QualityBest {
 			args = append(args,
-				"--format", "bestvideo+bestaudio/best",
+				"--format", "bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+				"--format-sort", "res,fps,vcodec:h264,aext:m4a",
 				"--merge-output-format", "mp4",
 			)
-		} else if options.Quality == config.QualityWorst {
+		} else if normQ == config.QualityWorst {
 			args = append(args, "--format", "worstvideo+worstaudio/worst")
 		} else {
-			// Parse quality to height and use DASH video+audio selector with single-stream fallback
-			height := options.Quality
-			if height == "hd2160" || height == config.Quality2160p {
-				height = "2160"
-			} else if height == "hd1440" || height == config.Quality1440p {
-				height = "1440"
-			} else if height == "hd1080" || height == config.Quality1080p {
-				height = "1080"
-			} else if height == "hd720" || height == config.Quality720p {
-				height = "720"
-			} else if height == "sd480" || height == config.Quality480p {
-				height = "480"
-			} else if height == "sd360" || height == config.Quality360p {
-				height = "360"
-			} else if height == "sd240" || height == config.Quality240p {
-				height = "240"
+			height, ok := config.QualityToHeight(normQ)
+			if !ok {
+				height = normQ
 			}
 			args = append(args,
-				"--format", fmt.Sprintf("bestvideo[height<=%s]+bestaudio/best[height<=%s]/best", height, height),
+				"--format", fmt.Sprintf("bestvideo[height<=%s]+bestaudio[ext=m4a]/bestvideo[height<=%s]+bestaudio/best[height<=%s]/best", height, height, height),
+				"--format-sort", "res,fps,vcodec:h264,aext:m4a",
 				"--merge-output-format", "mp4",
 			)
 		}

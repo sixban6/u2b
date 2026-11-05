@@ -41,6 +41,7 @@ type ExtensionPresetsConfig struct {
 	AudioRootDir    string      `json:"audioRootDir"`
 	DefaultVideoDir string      `json:"defaultVideoDir"`
 	DefaultAudioDir string      `json:"defaultAudioDir"`
+	DefaultQuality  string      `json:"defaultQuality"`
 	CustomVideoDirs []PresetDir `json:"customVideoDirs,omitempty"`
 	CustomAudioDirs []PresetDir `json:"customAudioDirs,omitempty"`
 	HiddenDirs      []string    `json:"hiddenDirs,omitempty"`
@@ -241,8 +242,21 @@ func runNativeHost(cmd *cobra.Command, args []string) error {
 
 		case "save_presets":
 			if msg.Config != nil {
+				if msg.Config.DefaultQuality != "" {
+					msg.Config.DefaultQuality = config.NormalizeQuality(msg.Config.DefaultQuality)
+				}
 				_ = saveExtensionPresets(msg.Config)
 			}
+			sendConfig(sendMsg)
+
+		case "set_default_quality":
+			presets := loadRawExtensionPresets()
+			normQ := config.NormalizeQuality(msg.Quality)
+			if normQ == "" {
+				normQ = config.Quality1080p
+			}
+			presets.DefaultQuality = normQ
+			_ = saveExtensionPresets(presets)
 			sendConfig(sendMsg)
 
 		case "set_root_dir":
@@ -475,9 +489,16 @@ func handleNativeDownload(ctx context.Context, msg nativeIncomingMessage, sendMs
 		selectedFormat = config.OutputFormatMP3
 	}
 
-	selectedQuality := cfg.Quality.Preferred
-	if msg.Quality != "" {
+	selectedQuality := presets.DefaultQuality
+	if selectedQuality == "" {
+		selectedQuality = cfg.Quality.Preferred
+	}
+	if strings.TrimSpace(msg.Quality) != "" {
 		selectedQuality = msg.Quality
+	}
+	selectedQuality = config.NormalizeQuality(selectedQuality)
+	if selectedQuality == "" {
+		selectedQuality = config.Quality1080p
 	}
 
 	if msg.IsPlaylist {
@@ -556,11 +577,12 @@ func sendConfig(sendMsg func(any)) {
 	presets := loadExtensionPresets()
 	sendMsg(map[string]any{
 		"type":            "config",
-		"version":         "1.0.0",
+		"version":         Version,
 		"videoRootDir":    presets.VideoRootDir,
 		"audioRootDir":    presets.AudioRootDir,
 		"defaultVideoDir": presets.DefaultVideoDir,
 		"defaultAudioDir": presets.DefaultAudioDir,
+		"defaultQuality":  presets.DefaultQuality,
 		"videoDirs":       presets.VideoDirs,
 		"audioDirs":       presets.AudioDirs,
 	})
@@ -622,6 +644,12 @@ func loadExtensionPresets() *ExtensionPresetsConfig {
 		if cfg.DefaultAudioDir == "" {
 			cfg.DefaultAudioDir = def.DefaultAudioDir
 		}
+	}
+
+	if cfg.DefaultQuality == "" {
+		cfg.DefaultQuality = resolveConfiguredDefaultQuality()
+	} else {
+		cfg.DefaultQuality = config.NormalizeQuality(cfg.DefaultQuality)
 	}
 
 	hiddenSet := make(map[string]bool, len(cfg.HiddenDirs))
@@ -723,6 +751,18 @@ func resolveDefaultSubdir(rootDir string) string {
 	return u2bSub
 }
 
+func resolveConfiguredDefaultQuality() string {
+	cfgPath := getEffectiveConfigPath()
+	if cfgPath != "" {
+		if _, err := os.Stat(cfgPath); err == nil {
+			if c, err := config.LoadConfig(cfgPath); err == nil && c != nil && c.Quality.Preferred != "" {
+				return config.NormalizeQuality(c.Quality.Preferred)
+			}
+		}
+	}
+	return config.Quality1080p
+}
+
 func buildDefaultExtensionPresets() *ExtensionPresetsConfig {
 	videoRoot, audioRoot := detectDefaultMediaRoots()
 	defaultVideo := resolveDefaultSubdir(videoRoot)
@@ -733,6 +773,7 @@ func buildDefaultExtensionPresets() *ExtensionPresetsConfig {
 		AudioRootDir:    audioRoot,
 		DefaultVideoDir: defaultVideo,
 		DefaultAudioDir: defaultAudio,
+		DefaultQuality:  resolveConfiguredDefaultQuality(),
 	}
 	cfg.VideoDirs = scanAndMergeDirs(videoRoot, defaultVideo, "视频默认 (u2b)", nil, nil)
 	cfg.AudioDirs = scanAndMergeDirs(audioRoot, defaultAudio, "音乐默认 (u2b)", nil, nil)

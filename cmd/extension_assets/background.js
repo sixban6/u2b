@@ -6,6 +6,7 @@ let appConfig = {
   audioRootDir: "",
   defaultVideoDir: "~/Movies/u2b",
   defaultAudioDir: "~/Music/u2b",
+  defaultQuality: "hd1080",
   videoDirs: [
     { label: "视频默认 (u2b)", path: "~/Movies/u2b" }
   ],
@@ -13,6 +14,33 @@ let appConfig = {
     { label: "音乐默认 (u2b)", path: "~/Music/u2b" }
   ]
 };
+
+function formatQualityLabel(q) {
+  switch ((q || "hd1080").toLowerCase()) {
+    case "best":
+      return "原画最高";
+    case "hd2160":
+    case "4k":
+    case "2160":
+    case "2160p":
+      return "原画 4K";
+    case "hd1440":
+    case "2k":
+    case "1440":
+    case "1440p":
+      return "2K";
+    case "hd720":
+    case "720":
+    case "720p":
+      return "720p";
+    case "sd480":
+    case "480":
+    case "480p":
+      return "480p";
+    default:
+      return "1080p";
+  }
+}
 
 // Map of taskId -> task state
 const activeTasks = new Map();
@@ -70,6 +98,7 @@ function handleNativeMessage(msg) {
     if (msg.audioRootDir) appConfig.audioRootDir = msg.audioRootDir;
     if (msg.defaultVideoDir) appConfig.defaultVideoDir = msg.defaultVideoDir;
     if (msg.defaultAudioDir) appConfig.defaultAudioDir = msg.defaultAudioDir;
+    if (msg.defaultQuality) appConfig.defaultQuality = msg.defaultQuality;
     if (Array.isArray(msg.videoDirs)) {
       appConfig.videoDirs = msg.videoDirs;
     }
@@ -214,7 +243,7 @@ function rebuildContextMenus() {
       chrome.contextMenus.create({
         id: "u2b-quick-video",
         parentId: "u2b-root",
-        title: `⚡ 快速下载视频 (1080p → ${shortenPath(appConfig.defaultVideoDir)})`,
+        title: `⚡ 快速下载视频 (${formatQualityLabel(appConfig.defaultQuality)} → ${shortenPath(appConfig.defaultVideoDir)})`,
         contexts,
         documentUrlPatterns: docPatterns
       });
@@ -404,7 +433,7 @@ function startDownloadTask({ url, title, format, quality, outputDir, filename, i
     url,
     title: title || url,
     format: format || "mp4",
-    quality: quality || "hd1080",
+    quality: quality || appConfig.defaultQuality || "hd1080",
     outputDir: outputDir || (format === "mp3" ? appConfig.defaultAudioDir : appConfig.defaultVideoDir),
     filename: filename || "",
     isPlaylist: Boolean(isPlaylist),
@@ -483,12 +512,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   const menuId = info.menuItemId;
 
+  const defaultQuality = appConfig.defaultQuality || "hd1080";
+
   if (menuId === "u2b-quick-video") {
     startDownloadTask({
       url: target.url,
       title: target.title,
       format: "mp4",
-      quality: "hd1080",
+      quality: defaultQuality,
       outputDir: appConfig.defaultVideoDir,
       tabId
     });
@@ -526,7 +557,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
           url: target.url,
           title: target.title,
           format: "mp4",
-          quality: "hd1080",
+          quality: defaultQuality,
           outputDir: picked,
           tabId
         });
@@ -540,7 +571,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         url: target.url,
         title: target.title,
         format: "mp4",
-        quality: "hd1080",
+        quality: defaultQuality,
         outputDir: dir.path,
         tabId
       });
@@ -581,7 +612,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       url: target.url,
       title: target.title || "播放列表下载",
       format: "mp4",
-      quality: "hd1080",
+      quality: defaultQuality,
       outputDir: appConfig.defaultVideoDir,
       isPlaylist: true,
       tabId
@@ -656,6 +687,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     requestNativeFolderPicker(msg.prompt).then((path) => {
       sendResponse({ path });
     });
+    return true;
+  }
+
+  if (msg.type === "set_default_quality") {
+    appConfig.defaultQuality = msg.quality || "hd1080";
+    chrome.storage.local.set({ u2bConfig: appConfig });
+    rebuildContextMenus();
+    sendNative({ type: "set_default_quality", quality: appConfig.defaultQuality });
+    broadcastToExtension({ type: "config_updated", config: appConfig });
+    sendResponse({ ok: true, config: appConfig });
     return true;
   }
 

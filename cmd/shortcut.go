@@ -168,7 +168,7 @@ func GenerateIOSShortcutXML(serverBaseURL, token string) string {
 		uuidLocalMP4   = "55555555-5555-5555-5555-555555555553"
 		uuidLocalMP3   = "55555555-5555-5555-5555-555555555554"
 
-		optQuickMP4 = "⚡ 快速下载视频 (存电脑 1080p)"
+		optQuickMP4 = "⚡ 快速下载视频 (存电脑)"
 		optQuickMP3 = "🎵 快速提取 MP3 (存电脑)"
 		optLocalMP4 = "📲 下载视频到 iPhone 本地"
 		optLocalMP3 = "🎧 下载 MP3 到 iPhone 本地"
