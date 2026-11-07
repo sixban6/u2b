@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -493,9 +494,15 @@ func (y *YtdlpExecutor) GetPlaylistInfo(ctx context.Context, url string, authArg
 	noSandbox := y.Config != nil && y.Config.Advanced.NoSandbox
 	cmd := WrapCommandInSandbox(ctx, y.ytdlpPath, args, "", ExtractCookieFilesFromArgs(authArgs), noSandbox)
 	HideConsole(cmd)
-	output, err := cmd.CombinedOutput()
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get playlist info: %w: %s", err, strings.TrimSpace(string(output)))
+		errDetail := strings.TrimSpace(stderrBuf.String())
+		if errDetail == "" {
+			errDetail = strings.TrimSpace(string(output))
+		}
+		return nil, fmt.Errorf("failed to get playlist info: %w: %s", err, errDetail)
 	}
 
 	// Parse JSON output - handle multiple JSON objects
@@ -534,9 +541,15 @@ func (y *YtdlpExecutor) GetVideoInfo(ctx context.Context, url string, authArgs [
 	noSandbox := y.Config != nil && y.Config.Advanced.NoSandbox
 	cmd := WrapCommandInSandbox(ctx, y.ytdlpPath, args, "", ExtractCookieFilesFromArgs(authArgs), noSandbox)
 	HideConsole(cmd)
-	output, err := cmd.CombinedOutput()
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get video info: %w: %s", err, strings.TrimSpace(string(output)))
+		errDetail := strings.TrimSpace(stderrBuf.String())
+		if errDetail == "" {
+			errDetail = strings.TrimSpace(string(output))
+		}
+		return nil, fmt.Errorf("failed to get video info: %w: %s", err, errDetail)
 	}
 
 	// Parse JSON output - handle multiple JSON objects

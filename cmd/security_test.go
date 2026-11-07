@@ -159,4 +159,24 @@ func TestMacSeatbeltSandboxIsolation(t *testing.T) {
 			t.Fatal("SECURITY FAILURE: sandboxed process was able to list ~/.ssh!")
 		}
 	}
+
+	// 4. Explicit --cookies file passed via extraReadFiles must be both readable and writable
+	// (because yt-dlp's YoutubeDL.close() calls save_cookies() on exit).
+	u2bDir := filepath.Join(homeDir, "u2b")
+	_ = os.MkdirAll(u2bDir, 0700)
+	testCookieFile := filepath.Join(u2bDir, ".sandbox_test_cookies.txt")
+	_ = os.WriteFile(testCookieFile, []byte("# Netscape HTTP Cookie File\n"), 0600)
+	defer os.Remove(testCookieFile)
+
+	cmdCookieSave := downloader.WrapCommandInSandbox(
+		context.Background(),
+		"/bin/sh",
+		[]string{"-c", "cat " + testCookieFile + " >/dev/null && echo '# updated' >> " + testCookieFile},
+		allowedDir,
+		[]string{testCookieFile},
+		false,
+	)
+	if out, err := cmdCookieSave.CombinedOutput(); err != nil {
+		t.Fatalf("expected explicit cookie file read/write to succeed in sandbox, got err: %v (%s)", err, string(out))
+	}
 }

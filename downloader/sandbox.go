@@ -132,11 +132,17 @@ func BuildMacSeatbeltProfile(outputDir string, extraReadFiles []string) string {
 		b.WriteString(")\n")
 	}
 
-	// Default-deny ALL file writes across the entire filesystem, allowing only target outputDir & temp/cache dirs
+	// Default-deny ALL file writes across the entire filesystem, allowing only target outputDir,
+	// explicit cookie files (yt-dlp saves updated cookies on exit), & temp/cache dirs
 	b.WriteString("(deny file-write*)\n")
 	b.WriteString("(allow file-write*\n")
 	if realOut != "" {
 		fmt.Fprintf(&b, "  (subpath \"%s\")\n", escapeSBPLString(realOut))
+	}
+	for _, rf := range extraReadFiles {
+		if realRF := resolveRealPathForSandbox(rf); realRF != "" {
+			fmt.Fprintf(&b, "  (literal \"%s\")\n", escapeSBPLString(realRF))
+		}
 	}
 	if realTmp != "" {
 		fmt.Fprintf(&b, "  (subpath \"%s\")\n", escapeSBPLString(realTmp))
@@ -146,6 +152,8 @@ func BuildMacSeatbeltProfile(outputDir string, extraReadFiles []string) string {
 	if realHome != "" {
 		fmt.Fprintf(&b, "  (subpath \"%s\")\n", escapeSBPLString(filepath.Join(realHome, ".cache", "yt-dlp")))
 		fmt.Fprintf(&b, "  (subpath \"%s\")\n", escapeSBPLString(filepath.Join(realHome, "Library", "Caches", "yt-dlp")))
+		fmt.Fprintf(&b, "  (subpath \"%s\")\n", escapeSBPLString(filepath.Join(realHome, ".cache", "deno")))
+		fmt.Fprintf(&b, "  (subpath \"%s\")\n", escapeSBPLString(filepath.Join(realHome, "Library", "Caches", "deno")))
 	}
 	b.WriteString("  (literal \"/dev/null\")\n")
 	b.WriteString("  (literal \"/dev/tty\")\n")
@@ -172,5 +180,25 @@ func WrapCommandInSandbox(ctx context.Context, binPath string, args []string, ou
 	sbArgs = append(sbArgs, "-p", profile, binPath)
 	sbArgs = append(sbArgs, args...)
 
-	return exec.CommandContext(ctx, sbPath, sbArgs...)
+	cmd := exec.CommandContext(ctx, sbPath, sbArgs...)
+
+	// If current working directory is inside a Seatbelt-denied path (e.g. ~/Documents or ~/Desktop)
+	// and not explicitly re-allowed via outputDir, switch child cwd to os.TempDir() so helper tools
+	// like `deno` (used by yt-dlp for YouTube JS challenges) never fail `getcwd()`.
+	if wd, wdErr := os.Getwd(); wdErr == nil {
+		realWD := resolveRealPathForSandbox(wd)
+		realOut := resolveRealPathForSandbox(outputDir)
+		homeDir, _ := os.UserHomeDir()
+		realHome := resolveRealPathForSandbox(homeDir)
+		if realHome != "" && realWD != "" {
+			inDenied := strings.HasPrefix(realWD, filepath.Join(realHome, "Documents")) ||
+				strings.HasPrefix(realWD, filepath.Join(realHome, "Desktop"))
+			outCoversWD := realOut != "" && strings.HasPrefix(realWD, realOut)
+			if inDenied && !outCoversWD {
+				cmd.Dir = os.TempDir()
+			}
+		}
+	}
+
+	return cmd
 }

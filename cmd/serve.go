@@ -1201,11 +1201,22 @@ func (s *U2BServer) executeServerTask(ctx context.Context, id string) {
 	_ = os.MkdirAll(t.OutputDir, 0755)
 	cfg.Download.OutputDir = t.OutputDir
 
-	// Automatically attach synced desktop Brave cookies only for YouTube URLs
+	// Automatically attach synced desktop Brave cookies only for YouTube URLs.
+	// Use a per-task temporary copy so concurrent yt-dlp invocations never race or clobber cookies_cache.txt on exit.
 	if cfg.Auth.Method == config.AuthMethodNone && config.IsYouTubeURL(t.URL) {
 		if cachedCookie := resolveCachedCookiesFile(); cachedCookie != "" {
-			cfg.Auth.Method = config.AuthMethodCookiesFile
-			cfg.Auth.CookiesFile = cachedCookie
+			if data, readErr := os.ReadFile(cachedCookie); readErr == nil && len(data) > 0 {
+				if tmpCookie, tmpErr := os.CreateTemp("", "u2b_srv_cookies_*.txt"); tmpErr == nil {
+					defer os.Remove(tmpCookie.Name())
+					_, _ = tmpCookie.Write(data)
+					_ = tmpCookie.Close()
+					cfg.Auth.Method = config.AuthMethodCookiesFile
+					cfg.Auth.CookiesFile = tmpCookie.Name()
+				} else {
+					cfg.Auth.Method = config.AuthMethodCookiesFile
+					cfg.Auth.CookiesFile = cachedCookie
+				}
+			}
 		}
 	}
 
@@ -1330,6 +1341,9 @@ func (s *U2BServer) updateTask(id string, mutator func(*ServerTask), persist boo
 }
 
 func (s *U2BServer) failTask(id, errMsg string) {
+	if len(errMsg) > 2000 {
+		errMsg = errMsg[len(errMsg)-2000:]
+	}
 	s.updateTask(id, func(st *ServerTask) {
 		st.Status = "error"
 		st.Error = errMsg
